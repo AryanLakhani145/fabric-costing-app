@@ -390,7 +390,8 @@ def calculate_costing(
     ends, warp_denier, picks, weft_denier, rs,
     warp_yarn_price, weft_yarn_price,
     weaving_rate_per_pick, grey_markup_percent,
-    rfd_charge_per_m, rfd_shortage_amount_per_m, rfd_markup_percent
+    rfd_charge_per_m, rfd_shortage_percent, rfd_markup_percent,
+    include_interest=True,       # 👈 NEW
 ):
     # Base weights (NO shortage)
     warp_weight_100 = (ends * warp_denier) / 90000.0
@@ -409,8 +410,9 @@ def calculate_costing(
     weaving_per_m = weaving_rate_per_pick * picks
     weaving_charge_100 = weaving_per_m * 100.0
 
-    # Interest on yarn
-    interest_on_yarn_100 = (warp_cost_100 + weft_cost_100) * 0.04
+    # 🔹 Interest on yarn – now optional
+    interest_on_yarn_100_full = (warp_cost_100 + weft_cost_100) * 0.04
+    interest_on_yarn_100 = interest_on_yarn_100_full if include_interest else 0.0
 
     # Grey cost
     final_grey_cost_100 = warp_cost_100 + weft_cost_100 + weaving_charge_100 + interest_on_yarn_100
@@ -423,8 +425,9 @@ def calculate_costing(
         grey_sale_per_m = grey_cost_per_m / (1 - grey_markup_percent / 100.0)
     grey_sale_100 = grey_sale_per_m * 100.0
 
-    # RFD cost: grey + RFD charge + RFD shortage (all in Rs/m)
-    rfd_cost_per_m = grey_cost_per_m + rfd_charge_per_m + rfd_shortage_amount_per_m
+    # RFD cost: (grey + RFD charge) * (1 + shortage%)
+    base_for_rfd = grey_cost_per_m + rfd_charge_per_m
+    rfd_cost_per_m = base_for_rfd * (1 + rfd_shortage_percent / 100.0)
 
     # RFD sale with markup as margin on selling price
     if rfd_markup_percent == 0:
@@ -692,9 +695,15 @@ elif page == "➕ New Costing":
         grey_markup_percent = st.number_input("Grey markup % (margin on sale)", min_value=0.0, step=0.5, value=0.0)
     with ch2:
         rfd_charge_per_m = st.number_input("RFD charge (₹ per m)", min_value=0.0, step=0.1, value=0.0)
-        rfd_shortage_per_m = st.number_input("RFD shortage (₹ per m)", min_value=0.0, step=0.1, value=0.0)
+        rfd_shortage_percent = st.number_input("RFD shortage (%)", min_value=0.0, step=0.1, value=0.0)
     with ch3:
         rfd_markup_percent = st.number_input("RFD markup % (margin on sale)", min_value=0.0, step=0.5, value=0.0)
+        
+        include_interest_new = st.checkbox(
+        "Include 4% interest on yarn in grey cost",
+        value=True,
+        key="include_interest_new"
+    )
 
     if st.button("Calculate & Save"):
         # Basic validation
@@ -744,8 +753,9 @@ elif page == "➕ New Costing":
                 weaving_rate_per_pick=weaving_rate_per_pick,
                 grey_markup_percent=grey_markup_percent,
                 rfd_charge_per_m=rfd_charge_per_m,
-                rfd_shortage_amount_per_m=rfd_shortage_per_m,
-                rfd_markup_percent=rfd_markup_percent
+                rfd_shortage_percent=rfd_shortage_percent,
+                rfd_markup_percent=rfd_markup_percent,
+                include_interest=include_interest_new,
             )
 
             data = {
@@ -769,7 +779,7 @@ elif page == "➕ New Costing":
                 "weaving_rate_per_pick": weaving_rate_per_pick,
                 "grey_markup_percent": grey_markup_percent,
                 "rfd_charge_per_m": rfd_charge_per_m,
-                "rfd_shortage_percent": rfd_shortage_per_m,
+                "rfd_shortage_percent": rfd_shortage_percent,
                 "rfd_markup_percent": rfd_markup_percent,
                 "warp_weight_100": cost["warp_weight_100"],
                 "weft_weight_100": cost["weft_weight_100"],
@@ -817,9 +827,6 @@ elif page == "➕ New Costing":
 # ---------------------------
 # Page: What-if Costing
 # ---------------------------
-# ---------------------------
-# Page: What-if Costing
-# ---------------------------
 elif page == "🔁 What-if Costing":
     st.header("🔁 What-if Costing (no save, just testing)")
 
@@ -844,6 +851,7 @@ elif page == "🔁 What-if Costing":
                 if not q:
                     st.error("Could not load this quality.")
                 else:
+                    # ✅ EVERYTHING till form_submit_button stays inside this form
                     with st.form("what_if_existing_form"):
                         ref_name = st.text_input("Reference name (not saved)", value=q["quality_name"])
 
@@ -959,8 +967,8 @@ elif page == "🔁 What-if Costing":
                                 step=0.1,
                                 value=float(q["rfd_charge_per_m"])
                             )
-                            wf_rfd_short = st.number_input(
-                                "RFD shortage (₹/m)",
+                            wf_rfd_shortage_percent = st.number_input(
+                                "RFD shortage (%)",
                                 min_value=0.0,
                                 step=0.1,
                                 value=float(q["rfd_shortage_percent"])
@@ -972,6 +980,14 @@ elif page == "🔁 What-if Costing":
                                 value=float(q["rfd_markup_percent"])
                             )
 
+                            # ✅ interest toggle must also be inside the form
+                            include_interest_wf_existing = st.checkbox(
+                                "Include 4% interest on yarn in grey cost",
+                                value=True,
+                                key="include_interest_wf_existing",
+                            )
+
+                        # 👇 THIS BUTTON **must** stay inside the `with st.form(...)` block
                         run_existing = st.form_submit_button("Recalculate (do not save)")
 
                     if run_existing:
@@ -1014,8 +1030,9 @@ elif page == "🔁 What-if Costing":
                                 weaving_rate_per_pick=float(wf_weaving_rate),
                                 grey_markup_percent=float(wf_grey_markup),
                                 rfd_charge_per_m=float(wf_rfd_charge),
-                                rfd_shortage_amount_per_m=float(wf_rfd_short),
-                                rfd_markup_percent=float(wf_rfd_markup)
+                                rfd_shortage_percent=float(wf_rfd_shortage_percent),
+                                rfd_markup_percent=float(wf_rfd_markup),
+                                include_interest=include_interest_wf_existing,
                             )
 
                             warp_weight_100 = cost["warp_weight_100"]
@@ -1053,82 +1070,88 @@ elif page == "🔁 What-if Costing":
     else:
         st.markdown("### Start from scratch (new recipe, not saved)")
 
-        with st.form("what_if_scratch_form"):
-            scratch_name = st.text_input("Reference name (not saved)", value="Scratch recipe")
+        scratch_name = st.text_input("Reference name (not saved)", value="Scratch recipe")
 
-            st.markdown("### Warp")
-            sw1, sw2 = st.columns(2)
-            with sw1:
-                sc_ends_mode_label = st.radio(
-                    "Ends input mode",
-                    ["Enter ends directly", "Calculate from reed, RS, borders"],
-                    index=0
-                )
-                sc_ends_mode = "direct" if sc_ends_mode_label == "Enter ends directly" else "calc"
-                sc_warp_denier = st.number_input(
-                    "Warp denier",
+        st.markdown("### Warp")
+        sw1, sw2 = st.columns(2)
+        with sw1:
+            sc_ends_mode_label = st.radio(
+                "Ends input mode",
+                ["Enter ends directly", "Calculate from reed, RS, borders"],
+                index=0
+            )
+            sc_ends_mode = "direct" if sc_ends_mode_label == "Enter ends directly" else "calc"
+            sc_warp_denier = st.number_input(
+                "Warp denier",
+                min_value=0.0,
+                step=0.1,
+                value=120.0
+            )
+        with sw2:
+            sc_rs = st.number_input("RS (for both warp & weft)", min_value=0.0, step=0.1, value=45.5)
+            sc_reed = st.number_input("Reed", min_value=0.0, step=0.1, value=80.0)
+            sc_borders = st.number_input("Borders", min_value=0.0, step=1.0, value=0.0)
+            sc_ends = st.number_input("Ends", min_value=0.0, step=1.0, value=3000.0)
+
+        st.markdown("### Weft")
+        swf1, swf2 = st.columns(2)
+        with swf1:
+            sc_picks = st.number_input("Picks", min_value=0.0, step=1.0, value=48.0)
+            sc_weft_mode_label = st.radio(
+                "Weft specification",
+                ["Denier", "Count (Ne)"],
+                index=0
+            )
+            sc_weft_mode = "denier" if sc_weft_mode_label == "Denier" else "count"
+        with swf2:
+            if sc_weft_mode == "denier":
+                sc_weft_denier = st.number_input(
+                    "Weft denier",
                     min_value=0.0,
                     step=0.1,
-                    value=120.0
+                    value=75.0
                 )
-            with sw2:
-                sc_rs = st.number_input("RS (for both warp & weft)", min_value=0.0, step=0.1, value=45.5)
-                sc_reed = st.number_input("Reed", min_value=0.0, step=0.1, value=80.0)
-                sc_borders = st.number_input("Borders", min_value=0.0, step=1.0, value=0.0)
-                sc_ends = st.number_input("Ends", min_value=0.0, step=1.0, value=3000.0)
+                sc_weft_count = None
+            else:
+                sc_weft_count = st.number_input(
+                    "Weft count (Ne)",
+                    min_value=0.0,
+                    step=0.1,
+                    value=27.0
+                )
+                sc_weft_denier = None
 
-            st.markdown("### Weft")
-            swf1, swf2 = st.columns(2)
-            with swf1:
-                sc_picks = st.number_input("Picks", min_value=0.0, step=1.0, value=48.0)
-                sc_weft_mode_label = st.radio(
-                    "Weft specification",
-                    ["Denier", "Count (Ne)"],
-                    index=1
-                )
-                sc_weft_mode = "denier" if sc_weft_mode_label == "Denier" else "count"
-            with swf2:
-                if sc_weft_mode == "denier":
-                    sc_weft_denier = st.number_input(
-                        "Weft denier",
-                        min_value=0.0,
-                        step=0.1,
-                        value=75.0
-                    )
-                    sc_weft_count = None
-                else:
-                    sc_weft_count = st.number_input(
-                        "Weft count (Ne)",
-                        min_value=0.0,
-                        step=0.1,
-                        value=27.0
-                    )
-                    sc_weft_denier = None
+        st.markdown("### Charges & Markups")
+        sch1, sch2, sch3 = st.columns(3)
+        with sch1:
+            sc_warp_price = st.number_input(
+                "Warp yarn price (₹/kg)", min_value=0.0, step=0.1, value=450.0
+            )
+            sc_weft_price = st.number_input(
+                "Weft yarn price (₹/kg)", min_value=0.0, step=0.1, value=220.0
+            )
+        with sch2:
+            sc_weaving_rate = st.number_input(
+                "Weaving charge per pick (₹/pick/m)", min_value=0.0, step=0.01, value=0.16
+            )
+            sc_grey_markup = st.number_input(
+                "Grey markup % (margin on sale)", min_value=0.0, step=0.5, value=8.0
+            )
+        with sch3:
+            sc_rfd_charge = st.number_input("RFD charge (₹/m)", min_value=0.0, step=0.1, value=1.7)
+            sc_rfd_short = st.number_input("RFD shortage (%)", min_value=0.0, step=0.1, value=5.5)
+            sc_rfd_markup = st.number_input(
+                "RFD markup % (margin on sale)", min_value=0.0, step=0.5, value=10.0
+            )
 
-            st.markdown("### Charges & Markups")
-            sch1, sch2, sch3 = st.columns(3)
-            with sch1:
-                sc_warp_price = st.number_input(
-                    "Warp yarn price (₹/kg)", min_value=0.0, step=0.1, value=450.0
-                )
-                sc_weft_price = st.number_input(
-                    "Weft yarn price (₹/kg)", min_value=0.0, step=0.1, value=220.0
-                )
-            with sch2:
-                sc_weaving_rate = st.number_input(
-                    "Weaving charge per pick (₹/pick/m)", min_value=0.0, step=0.01, value=0.16
-                )
-                sc_grey_markup = st.number_input(
-                    "Grey markup % (margin on sale)", min_value=0.0, step=0.5, value=8.0
-                )
-            with sch3:
-                sc_rfd_charge = st.number_input("RFD charge (₹/m)", min_value=0.0, step=0.1, value=1.7)
-                sc_rfd_short = st.number_input("RFD shortage (₹/m)", min_value=0.0, step=0.1, value=5.5)
-                sc_rfd_markup = st.number_input(
-                    "RFD markup % (margin on sale)", min_value=0.0, step=0.5, value=10.0
-                )
+            include_interest_wf_scratch = st.checkbox(
+                "Include 4% interest on yarn in grey cost",
+                value=True,
+                key="include_interest_wf_scratch"
+            )
 
-            scratch_btn = st.form_submit_button("Calculate (do not save)")
+        # 🔁 normal button instead of form submit
+        scratch_btn = st.button("Calculate (do not save)")
 
         if scratch_btn:
             errors = []
@@ -1156,6 +1179,7 @@ elif page == "🔁 What-if Costing":
             else:
                 if sc_ends_mode == "calc":
                     sc_ends = sc_reed * sc_rs + sc_borders
+                # 🔢 correct conversion when using count
                 if sc_weft_mode == "count":
                     sc_weft_den_val = 5315.0 / sc_weft_count
                 else:
@@ -1172,9 +1196,12 @@ elif page == "🔁 What-if Costing":
                     weaving_rate_per_pick=float(sc_weaving_rate),
                     grey_markup_percent=float(sc_grey_markup),
                     rfd_charge_per_m=float(sc_rfd_charge),
-                    rfd_shortage_amount_per_m=float(sc_rfd_short),
-                    rfd_markup_percent=float(sc_rfd_markup)
+                    rfd_shortage_percent=float(sc_rfd_short),
+                    rfd_markup_percent=float(sc_rfd_markup),
+                    include_interest=include_interest_wf_scratch,
                 )
+
+                # (rest of your metrics + recipe display stays exactly as you already had)
 
                 warp_weight_100 = cost["warp_weight_100"]
                 weft_weight_100 = cost["weft_weight_100"]
@@ -1318,7 +1345,7 @@ elif page == "🔍 Search Qualities":
                         st.write(f"Weaving rate per pick: {q['weaving_rate_per_pick']} ₹/pick/m")
                         st.write(f"Grey markup %: {q['grey_markup_percent']} %")
                         st.write(f"RFD charge / m: {q['rfd_charge_per_m']} ₹/m")
-                        st.write(f"RFD shortage (₹/m): {q['rfd_shortage_percent']} ₹/m")
+                        st.write(f"RFD shortage (%): {q['rfd_shortage_percent']} %")
                         st.write(f"RFD markup %: {q['rfd_markup_percent']} %")
 
                     with col2:
@@ -1456,8 +1483,8 @@ elif page == "🔍 Search Qualities":
                                 step=0.1,
                                 value=float(q["rfd_charge_per_m"])
                             )
-                            new_rfd_shortage_per_m = st.number_input(
-                                "RFD shortage (₹ per m)",
+                            new_rfd_shortage_percent = st.number_input(
+                                "RFD shortage (%)",
                                 min_value=0.0,
                                 step=0.1,
                                 value=float(q["rfd_shortage_percent"])
@@ -1468,6 +1495,11 @@ elif page == "🔍 Search Qualities":
                                 min_value=0.0,
                                 step=0.5,
                                 value=float(q["rfd_markup_percent"])
+                            )
+                            include_interest_edit = st.checkbox(
+                                "Include 4% interest on yarn in grey cost",
+                                value=True,
+                                key="include_interest_edit"
                             )
 
                         update_btn = st.form_submit_button("Save changes")
@@ -1515,8 +1547,9 @@ elif page == "🔍 Search Qualities":
                                 weaving_rate_per_pick=float(new_weaving_rate_per_pick),
                                 grey_markup_percent=float(new_grey_markup_percent),
                                 rfd_charge_per_m=float(new_rfd_charge_per_m),
-                                rfd_shortage_amount_per_m=float(new_rfd_shortage_per_m),
-                                rfd_markup_percent=float(new_rfd_markup_percent)
+                                rfd_shortage_percent=float(new_rfd_shortage_percent),
+                                rfd_markup_percent=float(new_rfd_markup_percent),
+                                include_interest=include_interest_edit,
                             )
 
                             upd = {
@@ -1540,7 +1573,7 @@ elif page == "🔍 Search Qualities":
                                 "weaving_rate_per_pick": float(new_weaving_rate_per_pick),
                                 "grey_markup_percent": float(new_grey_markup_percent),
                                 "rfd_charge_per_m": float(new_rfd_charge_per_m),
-                                "rfd_shortage_percent": float(new_rfd_shortage_per_m),
+                                "rfd_shortage_percent": float(new_rfd_shortage_percent),
                                 "rfd_markup_percent": float(new_rfd_markup_percent),
                                 "warp_weight_100": cost["warp_weight_100"],
                                 "weft_weight_100": cost["weft_weight_100"],
@@ -1585,21 +1618,18 @@ elif page == "📄 Pricing Sheet":
     if df.empty:
         st.info("No qualities saved yet.")
     else:
-        df["fabric_weight_tech_kg_100m"] = (df["warp_weight_100"] + df["weft_weight_100"]).round(3)
         df["fabric_weight_costing_kg_100m"] = ((df["warp_weight_100"] * 1.09) + df["weft_weight_100"]).round(3)
         df["grey_sale_per_m"] = (df["grey_sale_100"] / 100.0).round(2)
         df["rfd_sale_per_m"] = (df["rfd_sale_100"] / 100.0).round(2)
 
         show_df = df[[
             "quality_name",
-            "fabric_weight_tech_kg_100m",
             "fabric_weight_costing_kg_100m",
             "grey_sale_per_m",
             "rfd_sale_per_m"
         ]].rename(columns={
             "quality_name": "Quality",
-            "fabric_weight_tech_kg_100m": "Weight (tech, kg/100m)",
-            "fabric_weight_costing_kg_100m": "Weight (warp+shortage, weft no shortage, kg/100m)",
+            "fabric_weight_costing_kg_100m": "Weight",
             "grey_sale_per_m": "Grey Sale (₹/m)",
             "rfd_sale_per_m": "RFD Sale (₹/m)"
         })
