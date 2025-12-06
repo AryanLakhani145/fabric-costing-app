@@ -368,7 +368,8 @@ def update_quality(q_id, data):
             warp_weight_100 = ?, weft_weight_100 = ?, fabric_weight_100 = ?,
             warp_cost_100 = ?, weft_cost_100 = ?, weaving_charge_100 = ?,
             interest_on_yarn_100 = ?, final_grey_cost_100 = ?,
-            grey_sale_100 = ?, rfd_cost_100 = ?, rfd_sale_100 = ?
+            grey_sale_100 = ?, rfd_cost_100 = ?, rfd_sale_100 = ?,
+            wefts_json = ?
         WHERE id = ?
     """, (
         data["created_at"], data["quality_name"],
@@ -382,6 +383,7 @@ def update_quality(q_id, data):
         data["warp_cost_100"], data["weft_cost_100"], data["weaving_charge_100"],
         data["interest_on_yarn_100"], data["final_grey_cost_100"],
         data["grey_sale_100"], data["rfd_cost_100"], data["rfd_sale_100"],
+        data.get("wefts_json"),
         q_id
     ))
 
@@ -2033,6 +2035,26 @@ elif page == "🔍 Search Qualities":
                 elif view_mode == "Edit":
                     st.subheader("Edit Quality (overwrite)")
 
+                    # 🔹 Load existing wefts (multi or single) as base rows
+                    base_wefts = []
+                    if q.get("wefts_json"):
+                        try:
+                            base_wefts = json.loads(q["wefts_json"])
+                        except Exception:
+                            base_wefts = []
+                    if not base_wefts:
+                        # fallback: single-weft legacy
+                        base_wefts = [{
+                            "picks": q["picks"],
+                            "mode": q["weft_denier_mode"],
+                            "denier": q["weft_denier"],
+                            "count": q["weft_count"],
+                            "yarn_name": q["weft_yarn_name"],
+                            "price": q["weft_yarn_price"],
+                        }]
+
+                    weft_rows = []  # will be filled inside form
+
                     with st.form("edit_quality_form"):
                         eq1, eq2, eq3 = st.columns(3)
                         with eq1:
@@ -2071,7 +2093,7 @@ elif page == "🔍 Search Qualities":
                                 value=float(q["ends"])
                             )
 
-                        ew1, ew2, ew3 = st.columns(3)
+                        ew1, ew2 = st.columns(2)
                         with ew1:
                             new_warp_denier = st.number_input(
                                 "Warp denier",
@@ -2079,50 +2101,113 @@ elif page == "🔍 Search Qualities":
                                 step=0.1,
                                 value=float(q["warp_denier"])
                             )
-                            new_picks = st.number_input(
-                                "Picks",
-                                min_value=0.0,
-                                step=1.0,
-                                value=float(q["picks"])
-                            )
                         with ew2:
-                            new_weft_denier_mode_label = st.radio(
-                                "Weft specification",
-                                ["Denier", "Count (Ne)"],
-                                index=0 if q["weft_denier_mode"] == "denier" else 1,
-                                key="edit_weft_mode"
-                            )
-                            new_weft_denier_mode = "denier" if new_weft_denier_mode_label == "Denier" else "count"
-                            if new_weft_denier_mode == "denier":
-                                new_weft_denier = st.number_input(
-                                    "Weft denier",
-                                    min_value=0.0,
-                                    step=0.1,
-                                    value=float(q["weft_denier"])
-                                )
-                                new_weft_count = q["weft_count"]
-                            else:
-                                new_weft_count = st.number_input(
-                                    "Weft count (Ne)",
-                                    min_value=0.0,
-                                    step=0.1,
-                                    value=float(q["weft_count"] if q["weft_count"] else 0.0)
-                                )
-                                new_weft_denier = q["weft_denier"]
-                        with ew3:
                             new_warp_yarn_price = st.number_input(
                                 "Warp yarn price per kg (₹)",
                                 min_value=0.0,
                                 step=0.1,
                                 value=float(q["warp_yarn_price"])
                             )
-                            new_weft_yarn_price = st.number_input(
-                                "Weft yarn price per kg (₹)",
-                                min_value=0.0,
-                                step=0.1,
-                                value=float(q["weft_yarn_price"])
-                            )
 
+                        # 🔹 Multi-weft edit section
+                        st.markdown("### Weft (multi-weft)")
+
+                        weft_yarn_names = list_yarn_names("weft")
+
+                        for idx, wf in enumerate(base_wefts):
+                            st.markdown(f"**Weft {idx+1}**")
+                            c1, c2, c3 = st.columns([1.2, 1.5, 1.5])
+
+                            with c1:
+                                picks_val = st.number_input(
+                                    "Picks",
+                                    min_value=0.0,
+                                    step=1.0,
+                                    key=f"edit_weft_picks_{selected_id}_{idx}",
+                                    value=float(wf.get("picks", 0.0) or 0.0),
+                                )
+
+                            with c2:
+                                mode_label = st.radio(
+                                    "Weft spec",
+                                    ["Denier", "Count (Ne)"],
+                                    index=0 if wf.get("mode", "denier") == "denier" else 1,
+                                    key=f"edit_weft_mode_{selected_id}_{idx}",
+                                    horizontal=True,
+                                )
+                                mode = "denier" if mode_label == "Denier" else "count"
+
+                                denier_val = float(wf.get("denier", 0.0) or 0.0)
+                                count_val = float(wf.get("count", 0.0) or 0.0)
+
+                                if mode == "denier":
+                                    denier_val = st.number_input(
+                                        "Denier",
+                                        min_value=0.0,
+                                        step=0.1,
+                                        key=f"edit_weft_denier_{selected_id}_{idx}",
+                                        value=denier_val,
+                                    )
+                                    count_val = 0.0
+                                else:
+                                    count_val = st.number_input(
+                                        "Count (Ne)",
+                                        min_value=0.0,
+                                        step=0.1,
+                                        key=f"edit_weft_count_{selected_id}_{idx}",
+                                        value=count_val,
+                                    )
+                                    if count_val > 0:
+                                        denier_val = 5315.0 / count_val
+
+                            with c3:
+                                yarn_options = ["(manual price)"] + weft_yarn_names
+                                yarn_name_val = wf.get("yarn_name") or "(manual price)"
+
+                                yarn_name_val = st.selectbox(
+                                    "Weft yarn",
+                                    yarn_options,
+                                    key=f"edit_weft_yarn_{selected_id}_{idx}",
+                                    index=yarn_options.index(yarn_name_val) if yarn_name_val in yarn_options else 0,
+                                )
+
+                                price_val = float(wf.get("price", 0.0) or 0.0)
+
+                                # 🔥 Auto-fill from yarn table
+                                if yarn_name_val != "(manual price)":
+                                    latest_price, latest_dnr, latest_cnt = get_latest_yarn_price(yarn_name_val, "weft")
+                                    if latest_price is not None:
+                                        price_val = latest_price
+                                    if mode == "denier":
+                                        if latest_dnr is not None and latest_dnr > 0:
+                                            denier_val = latest_dnr
+                                        elif latest_cnt is not None and latest_cnt > 0:
+                                            denier_val = 5315.0 / latest_cnt
+                                    else:
+                                        if latest_cnt is not None and latest_cnt > 0:
+                                            count_val = latest_cnt
+                                            denier_val = 5315.0 / latest_cnt
+                                        elif latest_dnr is not None and latest_dnr > 0:
+                                            denier_val = latest_dnr
+
+                                price_val = st.number_input(
+                                    "Price (₹/kg)",
+                                    min_value=0.0,
+                                    step=0.1,
+                                    key=f"edit_weft_price_{selected_id}_{idx}",
+                                    value=price_val,
+                                )
+
+                            weft_rows.append({
+                                "picks": picks_val,
+                                "mode": mode,
+                                "denier": denier_val,
+                                "count": count_val,
+                                "price": price_val,
+                                "yarn_name": yarn_name_val,
+                            })
+
+                        # 🔹 Charges & Markups
                         ec1, ec2, ec3 = st.columns(3)
                         with ec1:
                             new_weaving_rate_per_pick = st.number_input(
@@ -2170,41 +2255,73 @@ elif page == "🔍 Search Qualities":
                         errors = []
                         if new_rs <= 0:
                             errors.append("RS must be > 0")
-                        if new_picks <= 0:
-                            errors.append("Picks must be > 0")
                         if new_warp_denier <= 0:
                             errors.append("Warp denier must be > 0")
                         if new_ends_mode == "direct" and new_ends <= 0:
                             errors.append("Ends must be > 0 when entering directly")
                         if new_ends_mode == "calc" and new_reed <= 0:
                             errors.append("Reed must be > 0 when calculating ends")
-                        if new_weft_denier_mode == "denier":
-                            if new_weft_denier <= 0:
-                                errors.append("Weft denier must be > 0")
-                        else:
-                            if not new_weft_count or new_weft_count <= 0:
-                                errors.append("Weft count must be > 0")
                         if new_grey_markup_percent >= 100 or new_rfd_markup_percent >= 100:
                             errors.append("Markup % must be < 100 (margin on sale)")
+
+                        # weft validations + aggregation
+                        valid_wefts = []
+                        total_picks = 0.0
+                        num_for_den = 0.0
+                        num_for_price = 0.0
+
+                        for wf in weft_rows:
+                            p = float(wf["picks"] or 0.0)
+                            d = float(wf["denier"] or 0.0)
+                            price = float(wf["price"] or 0.0)
+                            mode = wf["mode"]
+                            cnt = float(wf["count"] or 0.0)
+                            yarn_name = wf["yarn_name"]
+
+                            label = f"Weft (yarn: {yarn_name})"
+                            if p <= 0:
+                                errors.append(f"{label}: Picks must be > 0")
+                                continue
+                            if price <= 0:
+                                errors.append(f"{label}: Price must be > 0")
+                                continue
+                            if d <= 0:
+                                errors.append(f"{label}: Denier must be > 0")
+                                continue
+
+                            valid_wefts.append({
+                                "picks": p,
+                                "denier": d,
+                                "price": price,
+                                "mode": mode,
+                                "count": cnt,
+                                "yarn_name": yarn_name,
+                            })
+
+                            total_picks += p
+                            num_for_den += p * d
+                            num_for_price += p * d * price
+
+                        if not valid_wefts:
+                            errors.append("At least one valid weft is required.")
 
                         if errors:
                             st.error("Fix these issues:\n- " + "\n- ".join(errors))
                         else:
                             if new_ends_mode == "calc":
                                 new_ends = new_reed * new_rs + new_borders
-                            if new_weft_denier_mode == "count":
-                                wd = 5315.0 / new_weft_count
-                            else:
-                                wd = new_weft_denier
+
+                            eff_weft_denier = num_for_den / total_picks
+                            eff_weft_price = num_for_price / num_for_den
 
                             cost = calculate_costing(
                                 ends=float(new_ends),
                                 warp_denier=float(new_warp_denier),
-                                picks=float(new_picks),
-                                weft_denier=float(wd),
+                                picks=float(total_picks),
+                                weft_denier=float(eff_weft_denier),
                                 rs=float(new_rs),
                                 warp_yarn_price=float(new_warp_yarn_price),
-                                weft_yarn_price=float(new_weft_yarn_price),
+                                weft_yarn_price=float(eff_weft_price),
                                 weaving_rate_per_pick=float(new_weaving_rate_per_pick),
                                 grey_markup_percent=float(new_grey_markup_percent),
                                 rfd_charge_per_m=float(new_rfd_charge_per_m),
@@ -2224,18 +2341,22 @@ elif page == "🔍 Search Qualities":
                                 "warp_denier": float(new_warp_denier),
                                 "warp_yarn_name": q["warp_yarn_name"],
                                 "warp_yarn_price": float(new_warp_yarn_price),
-                                "picks": float(new_picks),
+
+                                # aggregated weft
+                                "picks": float(total_picks),
                                 "weft_rs": float(new_rs),
-                                "weft_denier_mode": new_weft_denier_mode,
-                                "weft_denier": float(wd),
-                                "weft_count": float(new_weft_count) if new_weft_count else None,
-                                "weft_yarn_name": q["weft_yarn_name"],
-                                "weft_yarn_price": float(new_weft_yarn_price),
+                                "weft_denier_mode": "denier",
+                                "weft_denier": float(eff_weft_denier),
+                                "weft_count": None,
+                                "weft_yarn_name": None,
+                                "weft_yarn_price": float(eff_weft_price),
+
                                 "weaving_rate_per_pick": float(new_weaving_rate_per_pick),
                                 "grey_markup_percent": float(new_grey_markup_percent),
                                 "rfd_charge_per_m": float(new_rfd_charge_per_m),
                                 "rfd_shortage_percent": float(new_rfd_shortage_percent),
                                 "rfd_markup_percent": float(new_rfd_markup_percent),
+
                                 "warp_weight_100": cost["warp_weight_100"],
                                 "weft_weight_100": cost["weft_weight_100"],
                                 "fabric_weight_100": cost["fabric_weight_100"],
@@ -2247,11 +2368,14 @@ elif page == "🔍 Search Qualities":
                                 "grey_sale_100": cost["grey_sale_100"],
                                 "rfd_cost_100": cost["rfd_cost_100"],
                                 "rfd_sale_100": cost["rfd_sale_100"],
+
+                                "wefts_json": json.dumps(valid_wefts),
                             }
 
                             update_quality(selected_id, upd)
                             st.success("Quality updated (overwritten).")
-                            # 🔥 Delete button (outside the form)
+
+                    # 🔥 Delete button (outside the form)
                     if st.button(
                         "🗑 Delete this quality",
                         key=f"delete_quality_{selected_id}"
