@@ -4,6 +4,8 @@ import streamlit as st
 import sqlite3
 from datetime import date, datetime
 
+st.caption("🔁 Build: multi-weft v2")
+
 # ------------- SIMPLE PASSWORD PROTECTION -------------
 # Set your password here OR via an environment variable
 APP_PASSWORD = os.getenv("FABRIC_APP_PASSWORD", "2504052243")  # change this
