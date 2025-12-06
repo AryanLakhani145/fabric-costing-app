@@ -724,6 +724,10 @@ def calculate_costing_multi_weft(
 
 st.set_page_config(page_title="Fabric Costing App", layout="wide")
 
+# 🔒 Password gate – everything below runs only after correct password
+if not check_password():
+    st.stop()
+
 st.title("🧵 Fabric Costing App")
 
 # How many wefts to show in "What-if → Start from scratch"
