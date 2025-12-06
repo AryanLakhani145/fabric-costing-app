@@ -1,4 +1,5 @@
 import os
+import json 
 import streamlit as st
 import sqlite3
 from datetime import date, datetime
@@ -20,7 +21,7 @@ def check_password():
     if st.button("Login"):
         if password == APP_PASSWORD:
             st.session_state["authenticated"] = True
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("Wrong password.")
 
@@ -101,6 +102,11 @@ def init_db():
         rfd_sale_100 REAL NOT NULL
     );
     """)
+    # ✅ New: column for multi-weft data
+    try:
+        cur.execute("ALTER TABLE qualities ADD COLUMN wefts_json TEXT;")
+    except sqlite3.OperationalError:
+        pass
 
     conn.commit()
     conn.close()
@@ -321,9 +327,10 @@ def save_quality(data):
             warp_weight_100, weft_weight_100, fabric_weight_100,
             warp_cost_100, weft_cost_100, weaving_charge_100,
             interest_on_yarn_100, final_grey_cost_100,
-            grey_sale_100, rfd_cost_100, rfd_sale_100
+            grey_sale_100, rfd_cost_100, rfd_sale_100,
+            wefts_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         data["created_at"], data["quality_name"],
         data["ends_mode"], data["ends"], data["reed"], data["rs"], data["borders"], data["warp_denier"],
@@ -335,7 +342,8 @@ def save_quality(data):
         data["warp_weight_100"], data["weft_weight_100"], data["fabric_weight_100"],
         data["warp_cost_100"], data["weft_cost_100"], data["weaving_charge_100"],
         data["interest_on_yarn_100"], data["final_grey_cost_100"],
-        data["grey_sale_100"], data["rfd_cost_100"], data["rfd_sale_100"]
+        data["grey_sale_100"], data["rfd_cost_100"], data["rfd_sale_100"],
+        data.get("wefts_json")  # 👈 new
     ))
 
     conn.commit()
@@ -386,6 +394,161 @@ def delete_quality(q_id):
     conn.commit()
     conn.close()
 
+def compute_dynamic_cost(q):
+    """
+    Recompute costing using the recipe + latest yarn prices.
+    - Uses wefts_json if present (multi-weft).
+    - Falls back to single-weft fields if not.
+    """
+    # --- Warp: dynamic price & optional denier from yarn table ---
+    warp_denier = float(q["warp_denier"]) if q["warp_denier"] is not None else 0.0
+    warp_price = float(q["warp_yarn_price"]) if q["warp_yarn_price"] is not None else 0.0
+
+    if q.get("warp_yarn_name"):
+        latest_price, latest_dnr, latest_cnt = get_latest_yarn_price(q["warp_yarn_name"], "warp")
+        if latest_price:
+            warp_price = latest_price
+        if latest_dnr:
+            warp_denier = latest_dnr  # if you want denier to follow yarn table
+
+    ends = float(q["ends"])
+    rs = float(q["rs"])
+
+    # --- Build weft list ---
+    # --- Build weft list ---
+    weft_entries = []
+    weft_details = []   # 👈 for per-weft breakdown
+
+    if q.get("wefts_json"):
+        # Multi-weft case
+        try:
+            stored_wefts = json.loads(q["wefts_json"])
+        except Exception:
+            stored_wefts = []
+
+        for wf in stored_wefts:
+            p = float(wf.get("picks", 0.0) or 0.0)
+            d = float(wf.get("denier", 0.0) or 0.0)
+            price = float(wf.get("price", 0.0) or 0.0)
+            mode = wf.get("mode", "denier")
+            cnt = wf.get("count", 0.0) or 0.0
+            yarn_name = wf.get("yarn_name")
+
+            # Override from yarn table if yarn_name is linked
+            if yarn_name and yarn_name != "(manual price)":
+                latest_price, latest_dnr, latest_cnt = get_latest_yarn_price(yarn_name, "weft")
+                if latest_price:
+                    price = latest_price
+                if mode == "denier" and latest_dnr:
+                    d = latest_dnr
+                if mode == "count":
+                    # Prefer count from yarn table, then convert to denier
+                    if latest_cnt:
+                        cnt = latest_cnt
+                    if cnt and cnt > 0:
+                        d = 5315.0 / cnt
+
+            # per-weft technical weight / 100 m (no shortage)
+            if p > 0 and d > 0:
+                weight_100 = (p * d * rs) / 90000.0
+            else:
+                weight_100 = 0.0
+
+            if p > 0 and d > 0 and price > 0:
+                weft_entries.append({"picks": p, "denier": d, "price": price})
+
+            if p > 0 and d > 0:
+                weft_details.append({
+                    "label": f"Weft {len(weft_details) + 1}",
+                    "picks": p,
+                    "denier": d,
+                    "price": price,
+                    "weight_100": weight_100,
+                    "mode": mode,
+                    "count": cnt,
+                    "yarn_name": yarn_name,
+                })
+    else:
+        # Old single-weft records (no wefts_json)
+        p = float(q["picks"])
+        d = float(q["weft_denier"])
+        price = float(q["weft_yarn_price"])
+        mode = q.get("weft_denier_mode", "denier")
+        cnt = q.get("weft_count")
+        yarn_name = q.get("weft_yarn_name")
+
+        if yarn_name:
+            latest_price, latest_dnr, latest_cnt = get_latest_yarn_price(yarn_name, "weft")
+            if latest_price:
+                price = latest_price
+            if mode == "denier" and latest_dnr:
+                d = latest_dnr
+            if mode == "count":
+                if latest_cnt:
+                    cnt = latest_cnt
+                if cnt and cnt > 0:
+                    d = 5315.0 / cnt
+
+        if p > 0 and d > 0 and price > 0:
+            weft_entries.append({"picks": p, "denier": d, "price": price})
+
+        if p > 0 and d > 0:
+            weight_100 = (p * d * rs) / 90000.0
+            weft_details.append({
+                "label": "Weft 1",
+                "picks": p,
+                "denier": d,
+                "price": price,
+                "weight_100": weight_100,
+                "mode": mode,
+                "count": cnt,
+                "yarn_name": yarn_name,
+            })
+
+    # --- Aggregate wefts to effective denier & price ---
+    total_picks = sum(w["picks"] for w in weft_entries)
+    num_for_den = sum(w["picks"] * w["denier"] for w in weft_entries)
+    num_for_price = sum(w["picks"] * w["denier"] * w["price"] for w in weft_entries)
+
+    if total_picks <= 0 or num_for_den <= 0:
+        # Fallback to stored single-weft values if something's off
+        total_picks = float(q["picks"])
+        eff_weft_denier = float(q["weft_denier"])
+        eff_weft_price = float(q["weft_yarn_price"])
+    else:
+        eff_weft_denier = num_for_den / total_picks
+        eff_weft_price = num_for_price / num_for_den
+
+    weaving_rate = float(q["weaving_rate_per_pick"])
+    grey_markup = float(q["grey_markup_percent"])
+    rfd_charge = float(q["rfd_charge_per_m"])
+    rfd_short = float(q["rfd_shortage_percent"])
+    rfd_markup = float(q["rfd_markup_percent"])
+
+    # 🔥 Use your existing costing function
+    cost = calculate_costing(
+        ends=ends,
+        warp_denier=warp_denier,
+        picks=total_picks,
+        weft_denier=eff_weft_denier,
+        rs=rs,
+        warp_yarn_price=warp_price,
+        weft_yarn_price=eff_weft_price,
+        weaving_rate_per_pick=weaving_rate,
+        grey_markup_percent=grey_markup,
+        rfd_charge_per_m=rfd_charge,
+        rfd_shortage_percent=rfd_short,
+        rfd_markup_percent=rfd_markup,
+    )
+
+    # Also return the aggregated weft info in case UI wants it
+    cost["_dynamic_total_picks"] = total_picks
+    cost["_dynamic_eff_weft_denier"] = eff_weft_denier
+    cost["_dynamic_eff_weft_price"] = eff_weft_price
+    cost["_weft_breakdown"] = weft_details
+
+    return cost
+
 def calculate_costing(
     ends, warp_denier, picks, weft_denier, rs,
     warp_yarn_price, weft_yarn_price,
@@ -393,6 +556,8 @@ def calculate_costing(
     rfd_charge_per_m, rfd_shortage_percent, rfd_markup_percent,
     include_interest=True,       # 👈 NEW
 ):
+    
+
     # Base weights (NO shortage)
     warp_weight_100 = (ends * warp_denier) / 90000.0
     weft_weight_100 = (picks * weft_denier * rs) / 90000.0
@@ -455,6 +620,100 @@ def calculate_costing(
         "rfd_sale_100": rfd_sale_100,
     }
 
+def calculate_costing_multi_weft(
+    ends, warp_denier, rs,
+    warp_yarn_price,
+    weft_list,
+    weaving_rate_per_pick, grey_markup_percent,
+    rfd_charge_per_m, rfd_shortage_percent, rfd_markup_percent,
+    include_interest=True,
+):
+    """
+    Multi-weft version of calculate_costing.
+    weft_list = [
+        {"picks": ..., "weft_denier": ..., "weft_yarn_price": ...},
+        ...
+    ]
+    """
+    # ---- Warp (same logic as before) ----
+    warp_weight_100 = (ends * warp_denier) / 90000.0
+    warp_weight_100_short = warp_weight_100 * 1.09
+    warp_cost_100 = warp_weight_100_short * warp_yarn_price
+
+    # ---- Sum over all wefts ----
+    total_weft_weight_100 = 0.0          # technical (no shortage)
+    total_weft_weight_100_short = 0.0    # with shortage
+    total_weft_cost_100 = 0.0
+    total_picks = 0.0
+
+    for w in weft_list:
+        picks = w["picks"]
+        weft_den = w["weft_denier"]
+        price = w["weft_yarn_price"]
+
+        weft_weight_100 = (picks * weft_den * rs) / 90000.0
+        weft_weight_100_short = weft_weight_100 * 1.03
+        weft_cost_100 = weft_weight_100_short * price
+
+        total_weft_weight_100 += weft_weight_100
+        total_weft_weight_100_short += weft_weight_100_short
+        total_weft_cost_100 += weft_cost_100
+        total_picks += picks
+
+    # ---- Fabric weight (technical) ----
+    fabric_weight_100 = warp_weight_100 + total_weft_weight_100
+
+    # ---- Weaving ----
+    weaving_per_m = weaving_rate_per_pick * total_picks
+    weaving_charge_100 = weaving_per_m * 100.0
+
+    # ---- Interest on yarn (respect toggle) ----
+    if include_interest:
+        interest_on_yarn_100 = (warp_cost_100 + total_weft_cost_100) * 0.04
+    else:
+        interest_on_yarn_100 = 0.0
+
+    # ---- Grey cost ----
+    final_grey_cost_100 = warp_cost_100 + total_weft_cost_100 + weaving_charge_100 + interest_on_yarn_100
+    grey_cost_per_m = final_grey_cost_100 / 100.0
+
+    # Grey sale with markup as margin on selling price
+    if grey_markup_percent == 0:
+        grey_sale_per_m = grey_cost_per_m
+    else:
+        grey_sale_per_m = grey_cost_per_m / (1 - grey_markup_percent / 100.0)
+    grey_sale_100 = grey_sale_per_m * 100.0
+
+    # RFD cost: (grey + RFD charge) * (1 + shortage%)
+    base_for_rfd = grey_cost_per_m + rfd_charge_per_m
+    rfd_cost_per_m = base_for_rfd * (1 + rfd_shortage_percent / 100.0)
+
+    # RFD sale with markup as margin on selling price
+    if rfd_markup_percent == 0:
+        rfd_sale_per_m = rfd_cost_per_m
+    else:
+        rfd_sale_per_m = rfd_cost_per_m / (1 - rfd_markup_percent / 100.0)
+    rfd_cost_100 = rfd_cost_per_m * 100.0
+    rfd_sale_100 = rfd_sale_per_m * 100.0
+
+    return {
+        "warp_weight_100": warp_weight_100,
+        "weft_weight_100": total_weft_weight_100,
+        "fabric_weight_100": fabric_weight_100,
+        "warp_cost_100": warp_cost_100,
+        "weft_cost_100": total_weft_cost_100,
+        "weaving_charge_100": weaving_charge_100,
+        "interest_on_yarn_100": interest_on_yarn_100,
+        "final_grey_cost_100": final_grey_cost_100,
+        "grey_cost_per_m": grey_cost_per_m,
+        "grey_sale_per_m": grey_sale_per_m,
+        "grey_sale_100": grey_sale_100,
+        "rfd_cost_per_m": rfd_cost_per_m,
+        "rfd_sale_per_m": rfd_sale_per_m,
+        "rfd_cost_100": rfd_cost_100,
+        "rfd_sale_100": rfd_sale_100,
+    }
+
 # ---------------------------
 # Streamlit UI
 # ---------------------------
@@ -462,6 +721,10 @@ def calculate_costing(
 st.set_page_config(page_title="Fabric Costing App", layout="wide")
 
 st.title("🧵 Fabric Costing App")
+
+# How many wefts to show in "What-if → Start from scratch"
+if "scratch_weft_rows" not in st.session_state:
+    st.session_state["scratch_weft_rows"] = 1
 
 page = st.sidebar.radio(
     "Go to",
@@ -648,43 +911,155 @@ elif page == "➕ New Costing":
             borders = st.number_input("Borders (number of extra ends)", min_value=0.0, step=1.0)
 
     st.markdown("### Weft")
-    weft_col1, weft_col2, weft_col3 = st.columns(3)
 
-    with weft_col1:
-        picks = st.number_input("Picks", min_value=0.0, step=1.0)
-        weft_denier_mode_label = st.radio("Weft specification", ["Denier", "Count (Ne)"])
-        weft_denier_mode = "denier" if weft_denier_mode_label == "Denier" else "count"
+    # 🔹 Initialise session list for new-costing wefts
+    if "new_costing_wefts" not in st.session_state:
+        st.session_state["new_costing_wefts"] = [
+            {
+                "label": "Weft 1",
+                "picks": 0.0,
+                "mode": "denier",   # or "count"
+                "denier": 0.0,
+                "count": 0.0,
+                "yarn_name": "(manual price)",
+                "price": 0.0,
+            }
+        ]
 
-    with weft_col3:
-        weft_yarn_names = list_yarn_names("weft")
-        weft_yarn_name = st.selectbox("Weft yarn (from stored list)", ["(manual price)"] + weft_yarn_names)
-        weft_yarn_price_default = 0.0
-        weft_denier_from_yarn = None
-        weft_count_from_yarn = None
-        if weft_yarn_name != "(manual price)":
-            price, dnr, cnt = get_latest_yarn_price(weft_yarn_name, "weft")
-            if price:
-                weft_yarn_price_default = price
-            if dnr:
-                weft_denier_from_yarn = dnr
-            if cnt:
-                weft_count_from_yarn = cnt
-        weft_yarn_price = st.number_input(
-            "Weft yarn price per kg (₹)",
-            min_value=0.0,
-            step=0.1,
-            value=weft_yarn_price_default
+    wefts = st.session_state["new_costing_wefts"]
+
+    # 🔘 Button to add weft (kept near the weft section)
+    if st.button("➕ Add weft"):
+        wefts.append(
+            {
+                "label": f"Weft {len(wefts) + 1}",
+                "picks": 0.0,
+                "mode": "denier",
+                "denier": 0.0,
+                "count": 0.0,
+                "yarn_name": "(manual price)",
+                "price": 0.0,
+            }
         )
 
-    with weft_col2:
-        weft_denier = None
-        weft_count = None
-        if weft_denier_mode == "denier":
-            default_d = weft_denier_from_yarn if weft_denier_from_yarn else 0.0
-            weft_denier = st.number_input("Weft denier", min_value=0.0, step=0.1, value=default_d)
-        else:
-            default_c = weft_count_from_yarn if weft_count_from_yarn else 0.0
-            weft_count = st.number_input("Weft count (Ne)", min_value=0.0, step=0.1, value=default_c)
+    # Show each weft row
+    # Show each weft row
+    for idx, wf in enumerate(wefts):
+        st.markdown(f"**{wf['label']}**")
+
+        # ---- define keys for this row ----
+        picks_key   = f"new_weft_picks_{idx}"
+        mode_key    = f"new_weft_mode_{idx}"
+        denier_key  = f"new_weft_denier_{idx}"
+        count_key   = f"new_weft_count_{idx}"
+        price_key   = f"new_weft_price_{idx}"
+        yarn_key    = f"new_weft_yarn_{idx}"
+        last_yarn_key = f"new_weft_last_yarn_{idx}"
+
+        # ---- read current mode & yarn *from state* (before widgets) ----
+        current_mode_label = st.session_state.get(mode_key, "Denier")
+        current_mode = "denier" if current_mode_label == "Denier" else "count"
+
+        weft_yarn_names = list_yarn_names("weft")
+        yarn_options = ["(manual price)"] + weft_yarn_names
+        current_yarn = st.session_state.get(yarn_key, wf["yarn_name"])
+        if current_yarn not in yarn_options:
+            current_yarn = "(manual price)"
+
+        prev_yarn = st.session_state.get(last_yarn_key, None)
+
+        # ---- if yarn selected (and possibly changed), push latest vals into widget state ----
+        if current_yarn != "(manual price)":
+            latest_price, latest_denier, latest_count = get_latest_yarn_price(current_yarn, "weft")
+
+            yarn_changed = (current_yarn != prev_yarn)
+
+            # price
+            if latest_price is not None and (yarn_changed or st.session_state.get(price_key, 0.0) == 0.0):
+                st.session_state[price_key] = float(latest_price)
+
+            # denier / count depending on mode
+            if current_mode == "denier":
+                if latest_denier is not None and latest_denier > 0 \
+                   and (yarn_changed or st.session_state.get(denier_key, 0.0) == 0.0):
+                    st.session_state[denier_key] = float(latest_denier)
+                elif latest_count is not None and latest_count > 0 \
+                     and (yarn_changed or st.session_state.get(denier_key, 0.0) == 0.0):
+                    st.session_state[denier_key] = 5315.0 / float(latest_count)
+            else:  # count mode
+                if latest_count is not None and latest_count > 0 \
+                   and (yarn_changed or st.session_state.get(count_key, 0.0) == 0.0):
+                    st.session_state[count_key] = float(latest_count)
+                    st.session_state[denier_key] = 5315.0 / float(latest_count)
+                elif latest_denier is not None and latest_denier > 0 \
+                     and (yarn_changed or st.session_state.get(denier_key, 0.0) == 0.0):
+                    st.session_state[denier_key] = float(latest_denier)
+
+        # remember yarn for next run
+        st.session_state[last_yarn_key] = current_yarn
+
+        # ---------- now draw the widgets ----------
+        c1, c2, c3, c4 = st.columns([1.2, 1.5, 1.5, 0.7])
+
+        with c1:
+            wf["picks"] = st.number_input(
+                "Picks",
+                min_value=0.0,
+                step=1.0,
+                key=picks_key,
+                value=float(wf["picks"])
+            )
+
+        with c2:
+            mode_label = st.radio(
+                "Weft spec",
+                ["Denier", "Count (Ne)"],
+                index=0 if current_mode == "denier" else 1,
+                key=mode_key,
+                horizontal=True,
+            )
+            wf["mode"] = "denier" if mode_label == "Denier" else "count"
+
+            if wf["mode"] == "denier":
+                wf["denier"] = st.number_input(
+                    "Denier",
+                    min_value=0.0,
+                    step=0.1,
+                    key=denier_key,
+                    value=float(st.session_state.get(denier_key, wf["denier"]))
+                )
+                wf["count"] = 0.0
+            else:
+                wf["count"] = st.number_input(
+                    "Count (Ne)",
+                    min_value=0.0,
+                    step=0.1,
+                    key=count_key,
+                    value=float(st.session_state.get(count_key, wf["count"]))
+                )
+                if wf["count"] > 0:
+                    wf["denier"] = 5315.0 / wf["count"]
+
+        with c3:
+            wf["yarn_name"] = st.selectbox(
+                "Weft yarn",
+                yarn_options,
+                key=yarn_key,
+                index=yarn_options.index(current_yarn),
+            )
+
+            wf["price"] = st.number_input(
+                "Price (₹/kg)",
+                min_value=0.0,
+                step=0.1,
+                key=price_key,
+                value=float(st.session_state.get(price_key, wf["price"]))
+            )
+
+        with c4:
+            if st.button("🗑 Remove", key=f"new_weft_remove_{idx}"):
+                wefts.pop(idx)
+                st.rerun()
 
     st.markdown("### Charges & Markups")
     ch1, ch2, ch3 = st.columns(3)
@@ -706,95 +1081,166 @@ elif page == "➕ New Costing":
     )
 
     if st.button("Calculate & Save"):
-        # Basic validation
+        # ✅ Basic validation (warp + RS etc.)
         if not quality_name:
             st.error("Please enter a quality name.")
-        elif warp_denier <= 0 or warp_yarn_price <= 0 or weft_yarn_price <= 0:
-            st.error("Please enter valid yarn deniers/prices.")
+            st.stop()
+        elif warp_denier <= 0 or warp_yarn_price <= 0:
+            st.error("Please enter valid warp yarn denier/price.")
+            st.stop()
         elif rs is None or rs <= 0:
             st.error("Please enter a valid RS.")
-        elif picks <= 0:
-            st.error("Please enter valid picks.")
+            st.stop()
         elif grey_markup_percent >= 100 or rfd_markup_percent >= 100:
             st.error("Markup % must be less than 100 (it's margin on sale).")
+            st.stop()
+
+        # ✅ Build wefts list from session
+        raw_wefts = st.session_state.get("new_costing_wefts", [])
+        valid_wefts = []
+        total_picks = 0.0
+        num_for_den = 0.0       # Σ(picks * denier)
+        num_for_price = 0.0     # Σ(picks * denier * price)
+
+        for wf in raw_wefts:
+            p = float(wf.get("picks", 0.0) or 0.0)
+            d = float(wf.get("denier", 0.0) or 0.0)
+            price = float(wf.get("price", 0.0) or 0.0)
+            mode = wf.get("mode", "denier")
+            cnt = float(wf.get("count", 0.0) or 0.0)
+            yarn_name = wf.get("yarn_name")
+
+            if p > 0 and d > 0 and price > 0:
+                # 👉 this goes into DB in wefts_json
+                valid_wefts.append(
+                    {
+                        "picks": p,
+                        "denier": d,
+                        "price": price,
+                        "mode": mode,
+                        "count": cnt,
+                        "yarn_name": yarn_name,
+                    }
+                )
+                total_picks += p
+                num_for_den += p * d
+                num_for_price += p * d * price
+
+        if not valid_wefts:
+            st.error("Please enter at least one valid weft (picks, denier and price > 0).")
+            st.stop()
+
+        # 🔢 Effective weft values for the existing single-weft formula
+        # We want weight and cost to match sums over all wefts.
+        eff_weft_denier = num_for_den / total_picks        # Σ(p*d)/Σ(p)
+        eff_weft_price = num_for_price / num_for_den       # Σ(p*d*price)/Σ(p*d)
+
+        # ✅ Ends computation (same as before)
+        if ends_mode == "direct":
+            if ends is None or ends <= 0:
+                st.error("Please enter valid ends.")
+                st.stop()
         else:
-            # Ends computation
-            if ends_mode == "direct":
-                if ends is None or ends <= 0:
-                    st.error("Please enter valid ends.")
-                    st.stop()
-            else:
-                if reed is None or reed <= 0:
-                    st.error("Please enter a valid reed.")
-                    st.stop()
-                if borders is None:
-                    borders = 0.0
-                ends = reed * rs + borders
+            if reed is None or reed <= 0:
+                st.error("Please enter a valid reed.")
+                st.stop()
+            if borders is None:
+                borders = 0.0
+            ends = reed * rs + borders
 
-            # Weft denier
-            if weft_denier_mode == "denier":
-                if weft_denier is None or weft_denier <= 0:
-                    st.error("Please enter a valid weft denier.")
-                    st.stop()
-            else:
-                if weft_count is None or weft_count <= 0:
-                    st.error("Please enter a valid weft count.")
-                    st.stop()
-                weft_denier = 5315.0 / weft_count
+        # 🔥 Call your existing single-weft costing function
+        # Here we pass total_picks + effective weft denier/price
+        cost = calculate_costing(
+            ends=float(ends),
+            warp_denier=float(warp_denier),
+            picks=float(total_picks),
+            weft_denier=float(eff_weft_denier),
+            rs=float(rs),
+            warp_yarn_price=float(warp_yarn_price),
+            weft_yarn_price=float(eff_weft_price),
+            weaving_rate_per_pick=float(weaving_rate_per_pick),
+            grey_markup_percent=float(grey_markup_percent),
+            rfd_charge_per_m=float(rfd_charge_per_m),
+            rfd_shortage_percent=float(rfd_shortage_percent),
+            rfd_markup_percent=float(rfd_markup_percent),
+            # 👇 if your calculate_costing has include_interest,
+            # uncomment this and make sure include_interest_new exists:
+            # include_interest=include_interest_new,
+        )
 
-            cost = calculate_costing(
-                ends=ends,
-                warp_denier=warp_denier,
-                picks=picks,
-                weft_denier=weft_denier,
-                rs=rs,
-                warp_yarn_price=warp_yarn_price,
-                weft_yarn_price=weft_yarn_price,
-                weaving_rate_per_pick=weaving_rate_per_pick,
-                grey_markup_percent=grey_markup_percent,
-                rfd_charge_per_m=rfd_charge_per_m,
-                rfd_shortage_percent=rfd_shortage_percent,
-                rfd_markup_percent=rfd_markup_percent,
-                include_interest=include_interest_new,
-            )
+        # 🧾 Save everything, including full wefts as JSON
+        data = {
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "quality_name": quality_name,
+            "ends_mode": ends_mode,
+            "ends": float(ends),
+            "reed": float(reed) if reed is not None else None,
+            "rs": float(rs),
+            "borders": float(borders) if borders is not None else 0.0,
+            "warp_denier": float(warp_denier),
+            "warp_yarn_name": None if warp_yarn_name == "(manual price)" else warp_yarn_name,
+            "warp_yarn_price": float(warp_yarn_price),
 
-            data = {
-                "created_at": datetime.now().isoformat(timespec="seconds"),
-                "quality_name": quality_name,
-                "ends_mode": ends_mode,
-                "ends": ends,
-                "reed": reed,
-                "rs": rs,
-                "borders": borders,
-                "warp_denier": warp_denier,
-                "warp_yarn_name": None if warp_yarn_name == "(manual price)" else warp_yarn_name,
-                "warp_yarn_price": warp_yarn_price,
-                "picks": picks,
-                "weft_rs": rs,
-                "weft_denier_mode": weft_denier_mode,
-                "weft_denier": weft_denier,
-                "weft_count": weft_count,
-                "weft_yarn_name": None if weft_yarn_name == "(manual price)" else weft_yarn_name,
-                "weft_yarn_price": weft_yarn_price,
-                "weaving_rate_per_pick": weaving_rate_per_pick,
-                "grey_markup_percent": grey_markup_percent,
-                "rfd_charge_per_m": rfd_charge_per_m,
-                "rfd_shortage_percent": rfd_shortage_percent,
-                "rfd_markup_percent": rfd_markup_percent,
-                "warp_weight_100": cost["warp_weight_100"],
-                "weft_weight_100": cost["weft_weight_100"],
-                "fabric_weight_100": cost["fabric_weight_100"],
-                "warp_cost_100": cost["warp_cost_100"],
-                "weft_cost_100": cost["weft_cost_100"],
-                "weaving_charge_100": cost["weaving_charge_100"],
-                "interest_on_yarn_100": cost["interest_on_yarn_100"],
-                "final_grey_cost_100": cost["final_grey_cost_100"],
-                "grey_sale_100": cost["grey_sale_100"],
-                "rfd_cost_100": cost["rfd_cost_100"],
-                "rfd_sale_100": cost["rfd_sale_100"],
-            }
+            # Store aggregated weft as "main" fields for backward compatibility
+            "picks": float(total_picks),
+            "weft_rs": float(rs),
+            "weft_denier_mode": "denier",
+            "weft_denier": float(eff_weft_denier),
+            "weft_count": None,
+            "weft_yarn_name": None,  # multiple yarns, so we don't show a single name
+            "weft_yarn_price": float(eff_weft_price),
 
-            save_quality(data)
+            "weaving_rate_per_pick": float(weaving_rate_per_pick),
+            "grey_markup_percent": float(grey_markup_percent),
+            "rfd_charge_per_m": float(rfd_charge_per_m),
+            "rfd_shortage_percent": float(rfd_shortage_percent),
+            "rfd_markup_percent": float(rfd_markup_percent),
+
+            "warp_weight_100": cost["warp_weight_100"],
+            "weft_weight_100": cost["weft_weight_100"],
+            "fabric_weight_100": cost["fabric_weight_100"],
+            "warp_cost_100": cost["warp_cost_100"],
+            "weft_cost_100": cost["weft_cost_100"],
+            "weaving_charge_100": cost["weaving_charge_100"],
+            "interest_on_yarn_100": cost["interest_on_yarn_100"],
+            "final_grey_cost_100": cost["final_grey_cost_100"],
+            "grey_sale_100": cost["grey_sale_100"],
+            "rfd_cost_100": cost["rfd_cost_100"],
+            "rfd_sale_100": cost["rfd_sale_100"],
+
+            # 🔐 Full multi-weft detail
+            "wefts_json": json.dumps(valid_wefts),
+        }
+
+        save_quality(data)
+
+        st.success("Costing calculated and saved.")
+
+        st.markdown("### Results (per meter)")
+        grey_cost_per_m = cost["grey_cost_per_m"]
+        grey_sale_per_m = cost["grey_sale_per_m"]
+        rfd_cost_per_m = cost["rfd_cost_per_m"]
+        rfd_sale_per_m = cost["rfd_sale_per_m"]
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("Grey cost / m (₹)", f"{grey_cost_per_m:.2f}")
+            st.metric("Grey sale / m (₹)", f"{grey_sale_per_m:.2f}")
+            st.metric("RFD cost / m (₹)", f"{rfd_cost_per_m:.2f}")
+            st.metric("RFD sale / m (₹)", f"{rfd_sale_per_m:.2f}")
+        with c2:
+            st.markdown("#### Reference (per 100 m)")
+            st.write(f"Fabric weight / 100 m (no shortage): **{cost['fabric_weight_100']:.3f} kg**")
+            st.write(f"Warp weight / 100 m (no shortage): {cost['warp_weight_100']:.3f} kg")
+            st.write(f"Weft weight / 100 m (no shortage): {cost['weft_weight_100']:.3f} kg")
+            st.write(f"Warp cost / 100 m: {cost['warp_cost_100']:.2f} ₹")
+            st.write(f"Weft cost / 100 m: {cost['weft_cost_100']:.2f} ₹")
+            st.write(f"Weaving charge / 100 m: {cost['weaving_charge_100']:.2f} ₹")
+            st.write(f"Interest on yarn / 100 m: {cost['interest_on_yarn_100']:.2f} ₹")
+            st.write(f"Final grey cost / 100 m: {cost['final_grey_cost_100']:.2f} ₹")
+            st.write(f"Grey sale / 100 m: {cost['grey_sale_100']:.2f} ₹")
+            st.write(f"RFD cost / 100 m: {cost['rfd_cost_100']:.2f} ₹")
+            st.write(f"RFD sale / 100 m: {cost['rfd_sale_100']:.2f} ₹")
 
             st.success("Costing calculated and saved.")
 
@@ -935,17 +1381,30 @@ elif page == "🔁 What-if Costing":
                         st.markdown("### Charges & Markups")
                         c1, c2, c3 = st.columns(3)
                         with c1:
+                            # default to latest yarn prices if yarn names exist
+                            default_warp_price = q["warp_yarn_price"]
+                            if q["warp_yarn_name"]:
+                                latest_warp_price, _, _ = get_latest_yarn_price(q["warp_yarn_name"], "warp")
+                                if latest_warp_price:
+                                    default_warp_price = latest_warp_price
+
+                            default_weft_price = q["weft_yarn_price"]
+                            if q["weft_yarn_name"]:
+                                latest_weft_price, _, _ = get_latest_yarn_price(q["weft_yarn_name"], "weft")
+                                if latest_weft_price:
+                                    default_weft_price = latest_weft_price
+
                             wf_warp_price = st.number_input(
                                 "Warp yarn price per kg (₹)",
                                 min_value=0.0,
                                 step=0.1,
-                                value=float(q["warp_yarn_price"])
+                                value=float(default_warp_price)
                             )
                             wf_weft_price = st.number_input(
                                 "Weft yarn price per kg (₹)",
                                 min_value=0.0,
                                 step=0.1,
-                                value=float(q["weft_yarn_price"])
+                                value=float(default_weft_price)
                             )
                         with c2:
                             wf_weaving_rate = st.number_input(
@@ -1067,132 +1526,278 @@ elif page == "🔁 What-if Costing":
                                 st.write(f"(Weft denier used for costing: {wf_weft_denier:.2f})")
 
     # ---------- MODE 2: SCRATCH / NEW RECIPE (NOT SAVED) ----------
+    # ---------- MODE 2: SCRATCH / NEW RECIPE (NOT SAVED) ----------
     else:
         st.markdown("### Start from scratch (new recipe, not saved)")
 
-        scratch_name = st.text_input("Reference name (not saved)", value="Scratch recipe")
+        # Keep track of how many wefts we have in scratch mode
+        if "wf_scratch_num_wefts" not in st.session_state:
+            st.session_state["wf_scratch_num_wefts"] = 1
+        num_wefts = st.session_state["wf_scratch_num_wefts"]
 
-        st.markdown("### Warp")
-        sw1, sw2 = st.columns(2)
-        with sw1:
-            sc_ends_mode_label = st.radio(
-                "Ends input mode",
-                ["Enter ends directly", "Calculate from reed, RS, borders"],
-                index=0
-            )
-            sc_ends_mode = "direct" if sc_ends_mode_label == "Enter ends directly" else "calc"
-            sc_warp_denier = st.number_input(
-                "Warp denier",
-                min_value=0.0,
-                step=0.1,
-                value=120.0
-            )
-        with sw2:
-            sc_rs = st.number_input("RS (for both warp & weft)", min_value=0.0, step=0.1, value=45.5)
-            sc_reed = st.number_input("Reed", min_value=0.0, step=0.1, value=80.0)
-            sc_borders = st.number_input("Borders", min_value=0.0, step=1.0, value=0.0)
-            sc_ends = st.number_input("Ends", min_value=0.0, step=1.0, value=3000.0)
+        # We'll fill this inside the form and use it after
+        weft_rows = []
 
-        st.markdown("### Weft")
-        swf1, swf2 = st.columns(2)
-        with swf1:
-            sc_picks = st.number_input("Picks", min_value=0.0, step=1.0, value=48.0)
-            sc_weft_mode_label = st.radio(
-                "Weft specification",
-                ["Denier", "Count (Ne)"],
-                index=0
-            )
-            sc_weft_mode = "denier" if sc_weft_mode_label == "Denier" else "count"
-        with swf2:
-            if sc_weft_mode == "denier":
-                sc_weft_denier = st.number_input(
-                    "Weft denier",
+        with st.form("what_if_scratch_form"):
+            scratch_name = st.text_input("Reference name (not saved)", value="Scratch recipe")
+
+            # ---- WARP ----
+            st.markdown("### Warp")
+            sw1, sw2 = st.columns(2)
+            with sw1:
+                sc_ends_mode_label = st.radio(
+                    "Ends input mode",
+                    ["Enter ends directly", "Calculate from reed, RS, borders"],
+                    index=0,
+                    key="wf_scratch_ends_mode"
+                )
+                sc_ends_mode = "direct" if sc_ends_mode_label == "Enter ends directly" else "calc"
+                sc_warp_denier = st.number_input(
+                    "Warp denier",
                     min_value=0.0,
                     step=0.1,
-                    value=75.0
+                    value=120.0,
+                    key="wf_scratch_warp_denier"
                 )
-                sc_weft_count = None
-            else:
-                sc_weft_count = st.number_input(
-                    "Weft count (Ne)",
+            with sw2:
+                sc_rs = st.number_input(
+                    "RS (for both warp & weft)",
                     min_value=0.0,
                     step=0.1,
-                    value=27.0
+                    value=45.5,
+                    key="wf_scratch_rs"
                 )
-                sc_weft_denier = None
+                sc_reed = st.number_input(
+                    "Reed",
+                    min_value=0.0,
+                    step=0.1,
+                    value=80.0,
+                    key="wf_scratch_reed"
+                )
+                sc_borders = st.number_input(
+                    "Borders",
+                    min_value=0.0,
+                    step=1.0,
+                    value=0.0,
+                    key="wf_scratch_borders"
+                )
+                sc_ends = st.number_input(
+                    "Ends",
+                    min_value=0.0,
+                    step=1.0,
+                    value=3000.0,
+                    key="wf_scratch_ends"
+                )
 
-        st.markdown("### Charges & Markups")
-        sch1, sch2, sch3 = st.columns(3)
-        with sch1:
-            sc_warp_price = st.number_input(
-                "Warp yarn price (₹/kg)", min_value=0.0, step=0.1, value=450.0
-            )
-            sc_weft_price = st.number_input(
-                "Weft yarn price (₹/kg)", min_value=0.0, step=0.1, value=220.0
-            )
-        with sch2:
-            sc_weaving_rate = st.number_input(
-                "Weaving charge per pick (₹/pick/m)", min_value=0.0, step=0.01, value=0.16
-            )
-            sc_grey_markup = st.number_input(
-                "Grey markup % (margin on sale)", min_value=0.0, step=0.5, value=8.0
-            )
-        with sch3:
-            sc_rfd_charge = st.number_input("RFD charge (₹/m)", min_value=0.0, step=0.1, value=1.7)
-            sc_rfd_short = st.number_input("RFD shortage (%)", min_value=0.0, step=0.1, value=5.5)
-            sc_rfd_markup = st.number_input(
-                "RFD markup % (margin on sale)", min_value=0.0, step=0.5, value=10.0
-            )
+            # ---- WEFT (multi-weft) ----
+            st.markdown("### Weft")
+
+            header_col, btn_col = st.columns([3, 1])
+            with header_col:
+                st.write("Configure one or more wefts below:")
+            with btn_col:
+                col_add, col_remove = st.columns(2)
+                with col_add:
+                    add_weft_clicked = st.form_submit_button("➕", use_container_width=True)
+                with col_remove:
+                    remove_weft_clicked = st.form_submit_button("➖", use_container_width=True)
+
+            # Per-weft rows
+            for i in range(num_wefts):
+                st.markdown(f"**Weft {i+1}**")
+                c1, c2, c3 = st.columns(3)
+
+                with c1:
+                    picks_i = st.number_input(
+                        "Picks",
+                        min_value=0.0,
+                        step=1.0,
+                        value=48.0 if i == 0 else 0.0,
+                        key=f"wf_scratch_picks_{i}"
+                    )
+
+                with c2:
+                    mode_label_i = st.radio(
+                        "Weft specification",
+                        ["Denier", "Count (Ne)"],
+                        index=0,
+                        key=f"wf_scratch_mode_{i}",
+                        horizontal=True
+                    )
+
+                with c3:
+                    price_i = st.number_input(
+                        "Weft yarn price (₹/kg)",
+                        min_value=0.0,
+                        step=0.1,
+                        value=220.0 if i == 0 else 0.0,
+                        key=f"wf_scratch_price_{i}"
+                    )
+
+                if mode_label_i == "Denier":
+                    denier_i = st.number_input(
+                        "Weft denier",
+                        min_value=0.0,
+                        step=0.1,
+                        value=75.0 if i == 0 else 0.0,
+                        key=f"wf_scratch_denier_{i}"
+                    )
+                    count_i = None
+                    mode_i = "denier"
+                else:
+                    count_i = st.number_input(
+                        "Weft count (Ne)",
+                        min_value=0.0,
+                        step=0.1,
+                        value=0.0,
+                        key=f"wf_scratch_count_{i}"
+                    )
+                    denier_i = None
+                    mode_i = "count"
+
+                weft_rows.append(
+                    {
+                        "picks": picks_i,
+                        "mode": mode_i,
+                        "denier": denier_i,
+                        "count": count_i,
+                        "price": price_i,
+                    }
+                )
+
+            # ---- CHARGES & MARKUPS ----
+            st.markdown("### Charges & Markups")
+            sch1, sch2, sch3 = st.columns(3)
+            with sch1:
+                sc_warp_price = st.number_input(
+                    "Warp yarn price (₹/kg)",
+                    min_value=0.0,
+                    step=0.1,
+                    value=450.0,
+                    key="wf_scratch_warp_price"
+                )
+            with sch2:
+                sc_weaving_rate = st.number_input(
+                    "Weaving charge per pick (₹/pick/m)",
+                    min_value=0.0,
+                    step=0.01,
+                    value=0.16,
+                    key="wf_scratch_weaving_rate"
+                )
+                sc_grey_markup = st.number_input(
+                    "Grey markup % (margin on sale)",
+                    min_value=0.0,
+                    step=0.5,
+                    value=8.0,
+                    key="wf_scratch_grey_markup"
+                )
+            with sch3:
+                sc_rfd_charge = st.number_input(
+                    "RFD charge (₹/m)",
+                    min_value=0.0,
+                    step=0.1,
+                    value=1.7,
+                    key="wf_scratch_rfd_charge"
+                )
+                sc_rfd_short = st.number_input(
+                    "RFD shortage (%)",
+                    min_value=0.0,
+                    step=0.1,
+                    value=5.5,
+                    key="wf_scratch_rfd_short"
+                )
+                sc_rfd_markup = st.number_input(
+                    "RFD markup % (margin on sale)",
+                    min_value=0.0,
+                    step=0.5,
+                    value=10.0,
+                    key="wf_scratch_rfd_markup"
+                )
 
             include_interest_wf_scratch = st.checkbox(
-                "Include 4% interest on yarn in grey cost",
+                "Include interest in costing?",
                 value=True,
                 key="include_interest_wf_scratch"
             )
 
-        # 🔁 normal button instead of form submit
-        scratch_btn = st.button("Calculate (do not save)")
+            # Final calculate button
+            scratch_calc_clicked = st.form_submit_button("Calculate (do not save)")
 
-        if scratch_btn:
+        # ---------- Handle button actions outside the form ----------
+
+        # Add / remove wefts (these just change state and rerun)
+        if 'add_weft_clicked' in locals() and add_weft_clicked:
+            st.session_state["wf_scratch_num_wefts"] = num_wefts + 1
+            st.rerun()
+
+        if 'remove_weft_clicked' in locals() and remove_weft_clicked:
+            if num_wefts > 1:
+                st.session_state["wf_scratch_num_wefts"] = num_wefts - 1
+                st.rerun()
+
+        # Main calculation
+        if scratch_calc_clicked:
             errors = []
+
+            # Basic warp validations
             if sc_rs <= 0:
                 errors.append("RS must be > 0")
-            if sc_picks <= 0:
-                errors.append("Picks must be > 0")
             if sc_warp_denier <= 0:
                 errors.append("Warp denier must be > 0")
             if sc_ends_mode == "direct" and sc_ends <= 0:
                 errors.append("Ends must be > 0 when entering directly")
             if sc_ends_mode == "calc" and sc_reed <= 0:
                 errors.append("Reed must be > 0 when calculating ends")
-            if sc_weft_mode == "denier":
-                if sc_weft_denier <= 0:
-                    errors.append("Weft denier must be > 0")
-            else:
-                if not sc_weft_count or sc_weft_count <= 0:
-                    errors.append("Weft count must be > 0")
+            if sc_warp_price <= 0:
+                errors.append("Warp yarn price must be > 0")
+
             if sc_grey_markup >= 100 or sc_rfd_markup >= 100:
                 errors.append("Markup % must be < 100 (margin on sale)")
+
+            # Weft validations + conversion to actual denier
+            active_wefts = []
+            for idx, row in enumerate(weft_rows):
+                label = f"Weft {idx+1}"
+                if row["picks"] <= 0:
+                    errors.append(f"{label}: Picks must be > 0")
+                if row["price"] <= 0:
+                    errors.append(f"{label}: Weft yarn price must be > 0")
+
+                if row["mode"] == "denier":
+                    if row["denier"] is None or row["denier"] <= 0:
+                        errors.append(f"{label}: Weft denier must be > 0")
+                        continue
+                    weft_den_val = row["denier"]
+                else:
+                    if row["count"] is None or row["count"] <= 0:
+                        errors.append(f"{label}: Weft count (Ne) must be > 0")
+                        continue
+                    weft_den_val = 5315.0 / row["count"]
+
+                active_wefts.append(
+                    {
+                        "picks": float(row["picks"]),
+                        "weft_denier": float(weft_den_val),
+                        "weft_yarn_price": float(row["price"]),
+                    }
+                )
+
+            if not active_wefts:
+                errors.append("At least one valid weft is required.")
 
             if errors:
                 st.error("Fix these issues:\n- " + "\n- ".join(errors))
             else:
+                # Compute ends if needed
                 if sc_ends_mode == "calc":
                     sc_ends = sc_reed * sc_rs + sc_borders
-                # 🔢 correct conversion when using count
-                if sc_weft_mode == "count":
-                    sc_weft_den_val = 5315.0 / sc_weft_count
-                else:
-                    sc_weft_den_val = sc_weft_denier
 
-                cost = calculate_costing(
+                cost = calculate_costing_multi_weft(
                     ends=float(sc_ends),
                     warp_denier=float(sc_warp_denier),
-                    picks=float(sc_picks),
-                    weft_denier=float(sc_weft_den_val),
                     rs=float(sc_rs),
                     warp_yarn_price=float(sc_warp_price),
-                    weft_yarn_price=float(sc_weft_price),
+                    weft_list=active_wefts,
                     weaving_rate_per_pick=float(sc_weaving_rate),
                     grey_markup_percent=float(sc_grey_markup),
                     rfd_charge_per_m=float(sc_rfd_charge),
@@ -1200,8 +1805,6 @@ elif page == "🔁 What-if Costing":
                     rfd_markup_percent=float(sc_rfd_markup),
                     include_interest=include_interest_wf_scratch,
                 )
-
-                # (rest of your metrics + recipe display stays exactly as you already had)
 
                 warp_weight_100 = cost["warp_weight_100"]
                 weft_weight_100 = cost["weft_weight_100"]
@@ -1217,22 +1820,30 @@ elif page == "🔁 What-if Costing":
                     st.metric("RFD sale / m (₹)", f"{cost['rfd_sale_per_m']:.2f}")
                 with c2:
                     st.write(f"Fabric weight / 100 m (no shortage): **{fabric_weight_100:.3f} kg**")
-                    st.write(f"Fabric weight / 100 m (warp with shortage, weft no shortage): "
-                             f"**{fabric_weight_cost_style:.3f} kg**")
+                    st.write(
+                        "Fabric weight / 100 m (warp with shortage, weft no shortage): "
+                        f"**{fabric_weight_cost_style:.3f} kg**"
+                    )
                     st.write(f"Warp weight / 100 m (no shortage): {warp_weight_100:.3f} kg")
                     st.write(f"Weft weight / 100 m (no shortage): {weft_weight_100:.3f} kg")
 
                 st.markdown("### Recipe (scratch)")
                 st.write(f"Reed: {sc_reed}")
-                st.write(f"Picks: {sc_picks}")
-                st.write(f"Ends: {sc_ends} (mode: {sc_ends_mode})")
                 st.write(f"RS: {sc_rs}")
+                st.write(f"Ends: {sc_ends} (mode: {sc_ends_mode})")
                 st.write(f"Warp denier: {sc_warp_denier}")
-                if sc_weft_mode == "denier":
-                    st.write(f"Weft denier: {sc_weft_den_val:.2f}")
-                else:
-                    st.write(f"Weft count (Ne): {sc_weft_count}")
-                    st.write(f"(Weft denier used for costing: {sc_weft_den_val:.2f})")
+                for idx, row in enumerate(weft_rows):
+                    label = f"Weft {idx+1}"
+                    if row["mode"] == "denier":
+                        st.write(f"{label}: Picks {row['picks']}, Denier {row['denier']}, Price {row['price']} ₹/kg")
+                    else:
+                        weft_den_val = 5315.0 / row["count"] if row["count"] and row["count"] > 0 else 0
+                        st.write(
+                            f"{label}: Picks {row['picks']}, Count (Ne) {row['count']}, "
+                            f"Denier used {weft_den_val:.2f}, Price {row['price']} ₹/kg"
+                        )
+
+
 # ---------------------------
 # Page: Search Qualities
 # ---------------------------
@@ -1272,16 +1883,21 @@ elif page == "🔍 Search Qualities":
                     key="quality_view_mode"
                 )
 
-                warp_weight_100 = q["warp_weight_100"]
-                weft_weight_100 = q["weft_weight_100"]
-                fabric_weight_100 = q["fabric_weight_100"]
+                # 🔥 Recompute using latest yarn prices + multi-weft
+                cost = compute_dynamic_cost(q)
+
+                warp_weight_100 = cost["warp_weight_100"]
+                weft_weight_100 = cost["weft_weight_100"]
+                fabric_weight_100 = cost["fabric_weight_100"]
                 warp_weight_100_short = warp_weight_100 * 1.09
                 fabric_weight_costing_style = warp_weight_100_short + weft_weight_100
 
-                grey_cost_per_m = q["final_grey_cost_100"] / 100.0
-                grey_sale_per_m = q["grey_sale_100"] / 100.0
-                rfd_cost_per_m = q["rfd_cost_100"] / 100.0
-                rfd_sale_per_m = q["rfd_sale_100"] / 100.0
+                grey_cost_per_m = cost["grey_cost_per_m"]
+                grey_sale_per_m = cost["grey_sale_per_m"]
+                rfd_cost_per_m = cost["rfd_cost_per_m"]
+                rfd_sale_per_m = cost["rfd_sale_per_m"]
+
+                weft_breakdown = cost.get("_weft_breakdown", None)
 
                 # ---------- SUMMARY ----------
                 if view_mode == "Summary":
@@ -1300,23 +1916,66 @@ elif page == "🔍 Search Qualities":
                         )
                         st.write(f"Warp weight / 100 m (no shortage): {warp_weight_100:.3f} kg")
                         st.write(f"Weft weight / 100 m (no shortage): {weft_weight_100:.3f} kg")
+                        
+                        if weft_breakdown:
+                            st.markdown("**Weft-wise weight / 100 m (no shortage)**")
+                            for wf in weft_breakdown:
+                                st.write(
+                                    f"{wf['label']}: Picks {wf['picks']}, "
+                                    f"Denier {wf['denier']:.2f}, "
+                                    f"Weight {wf['weight_100']:.3f} kg"
+                                )
 
                 # ---------- RECIPE ----------
                 elif view_mode == "Recipe":
                     st.subheader("Recipe")
                     st.markdown("**Basic construction**")
                     st.write(f"Reed: {q['reed']}")
-                    st.write(f"Picks: {q['picks']}")
                     st.write(f"Ends: {q['ends']} (mode: {q['ends_mode']})")
                     st.write(f"RS: {q['rs']}")
                     st.write(f"Warp denier: {q['warp_denier']}")
-                    if q["weft_denier_mode"] == "denier":
-                        st.write(f"Weft denier: {q['weft_denier']}")
-                    else:
-                        st.write(f"Weft count (Ne): {q['weft_count']}")
-                        st.write(f"(Calculated weft denier used for costing: {q['weft_denier']})")
                     st.write(f"Warp yarn: {q['warp_yarn_name']} @ {q['warp_yarn_price']} ₹/kg")
-                    st.write(f"Weft yarn: {q['weft_yarn_name']} @ {q['weft_yarn_price']} ₹/kg")
+
+                    # --- Weft section ---
+                    st.markdown("### Weft recipe")
+
+                    # Try multi-weft first
+                    multi_wefts = None
+                    if q.get("wefts_json"):
+                        try:
+                            multi_wefts = json.loads(q["wefts_json"])
+                        except Exception:
+                            multi_wefts = None
+
+                    if multi_wefts:
+                        # Show each weft row
+                        for i, wf in enumerate(multi_wefts, start=1):
+                            p = wf.get("picks", 0)
+                            d = wf.get("denier", 0)
+                            mode = wf.get("mode", "denier")
+                            cnt = wf.get("count", 0)
+                            yarn_name = wf.get("yarn_name")
+                            price = wf.get("price", 0)
+
+                            st.markdown(f"**Weft {i}**")
+                            st.write(f"Picks: {p}")
+                            if mode == "count":
+                                st.write(f"Count: {cnt} Ne")
+                                st.write(f"(Denier used for costing: {d:.2f})")
+                            else:
+                                st.write(f"Denier: {d:.2f}")
+                            st.write(f"Yarn: {yarn_name}")
+                            st.write(f"Price: {price} ₹/kg")
+                            st.write("---")
+                    else:
+                        # Old single-weft fallback
+                        st.write(f"Picks: {q['picks']}")
+                        if q["weft_denier_mode"] == "denier":
+                            st.write(f"Weft denier: {q['weft_denier']}")
+                        else:
+                            st.write(f"Weft count (Ne): {q['weft_count']}")
+                            st.write(f"(Calculated weft denier used for costing: {q['weft_denier']})")
+                        st.write(f"Weft yarn: {q['weft_yarn_name']} @ {q['weft_yarn_price']} ₹/kg")
 
                 # ---------- DETAILS ----------
                 elif view_mode == "Details":
@@ -1353,15 +2012,15 @@ elif page == "🔍 Search Qualities":
                         st.write(f"Warp weight: {warp_weight_100:.3f} kg")
                         st.write(f"Weft weight: {weft_weight_100:.3f} kg")
                         st.write(f"Fabric weight: {fabric_weight_100:.3f} kg")
-                        st.write(f"Warp cost: {q['warp_cost_100']:.2f} ₹")
-                        st.write(f"Weft cost: {q['weft_cost_100']:.2f} ₹")
-                        st.write(f"Weaving charge: {q['weaving_charge_100']:.2f} ₹")
-                        st.write(f"Interest on yarn: {q['interest_on_yarn_100']:.2f} ₹")
-                        st.write(f"Final grey cost: {q['final_grey_cost_100']:.2f} ₹")
-                        st.write(f"Grey sale: {q['grey_sale_100']:.2f} ₹")
-                        st.write(f"RFD cost: {q['rfd_cost_100']:.2f} ₹")
-                        st.write(f"RFD sale: {q['rfd_sale_100']:.2f} ₹")
-
+                        st.write(f"Warp cost: {cost['warp_cost_100']:.2f} ₹")
+                        st.write(f"Weft cost: {cost['weft_cost_100']:.2f} ₹")
+                        st.write(f"Weaving charge: {cost['weaving_charge_100']:.2f} ₹")
+                        st.write(f"Interest on yarn: {cost['interest_on_yarn_100']:.2f} ₹")
+                        st.write(f"Final grey cost: {cost['final_grey_cost_100']:.2f} ₹")
+                        st.write(f"Grey sale: {cost['grey_sale_100']:.2f} ₹")
+                        st.write(f"RFD cost: {cost['rfd_cost_100']:.2f} ₹")
+                        st.write(f"RFD sale: {cost['rfd_sale_100']:.2f} ₹")
+                        
                         st.markdown("**Per meter**")
                         st.write(f"Grey cost / m: {grey_cost_per_m:.2f} ₹/m")
                         st.write(f"Grey sale / m: {grey_sale_per_m:.2f} ₹/m")
@@ -1604,42 +2263,44 @@ elif page == "🔍 Search Qualities":
 elif page == "📄 Pricing Sheet":
     st.header("📄 Pricing Sheet")
 
-    conn = get_conn()
-    import pandas as pd
-    df = pd.read_sql_query("""
-        SELECT id, quality_name,
-               warp_weight_100, weft_weight_100,
-               grey_sale_100, rfd_sale_100
-        FROM qualities
-        ORDER BY quality_name COLLATE NOCASE
-    """, conn)
-    conn.close()
-
-    if df.empty:
+    qualities = list_all_qualities()
+    if not qualities:
         st.info("No qualities saved yet.")
     else:
-        df["fabric_weight_costing_kg_100m"] = ((df["warp_weight_100"] * 1.09) + df["weft_weight_100"]).round(3)
-        df["grey_sale_per_m"] = (df["grey_sale_100"] / 100.0).round(2)
-        df["rfd_sale_per_m"] = (df["rfd_sale_100"] / 100.0).round(2)
+        import pandas as pd
 
-        show_df = df[[
-            "quality_name",
-            "fabric_weight_costing_kg_100m",
-            "grey_sale_per_m",
-            "rfd_sale_per_m"
-        ]].rename(columns={
-            "quality_name": "Quality",
-            "fabric_weight_costing_kg_100m": "Weight",
-            "grey_sale_per_m": "Grey Sale (₹/m)",
-            "rfd_sale_per_m": "RFD Sale (₹/m)"
-        })
+        rows = []
+        for q_id, q_name, created_at in qualities:
+            q = get_quality_by_id(q_id)
+            if not q:
+                continue
 
-        st.dataframe(show_df, use_container_width=True)
+            # 🔥 dynamic recalc using latest yarn prices + multi-weft
+            cost = compute_dynamic_cost(q)
 
-        csv = show_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "Download as CSV",
-            data=csv,
-            file_name="pricing_sheet.csv",
-            mime="text/csv"
-        )
+            warp_w_100 = cost["warp_weight_100"]
+            weft_w_100 = cost["weft_weight_100"]
+
+            # your preferred single weight column:
+            fabric_weight_cost = warp_w_100 * 1.09 + weft_w_100
+
+            rows.append({
+                "Quality": q_name,
+                "Weight (warp+shortage, weft no shortage, kg/100m)": round(fabric_weight_cost, 3),
+                "Grey Sale (₹/m)": round(cost["grey_sale_per_m"], 2),
+                "RFD Sale (₹/m)": round(cost["rfd_sale_per_m"], 2),
+            })
+
+        if not rows:
+            st.info("No qualities found.")
+        else:
+            df = pd.DataFrame(rows)
+            st.dataframe(df, use_container_width=True)
+
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Download as CSV",
+                data=csv,
+                file_name="pricing_sheet.csv",
+                mime="text/csv"
+            )
