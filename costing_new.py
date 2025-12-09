@@ -2,6 +2,8 @@ import os
 import json 
 import streamlit as st
 import sqlite3
+import psycopg2
+import psycopg2.extras
 from datetime import date, datetime
 
 st.caption("🔁 Build: multi-weft v2")
@@ -33,90 +35,32 @@ def check_password():
 # Database setup
 # ---------------------------
 
-DB_PATH = "fabric_costing.db"
+# ---------------------------
+# Database setup (Supabase Postgres)
+# ---------------------------
+
+from psycopg2.extras import RealDictCursor  # optional but handy
 
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA foreign_keys = ON;")
-    return conn
+    """
+    Open a new connection to Supabase Postgres using the connection string
+    stored in Streamlit secrets as SUPABASE_URI.
+    """
+    conn_str = st.secrets["SUPABASE_URI"]  # you already set this in Streamlit Cloud
+    return psycopg2.connect(conn_str)
+
 
 def init_db():
-    conn = get_conn()
-    cur = conn.cursor()
-
-    # Yarn prices table
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS yarn_prices (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        yarn_type TEXT NOT NULL,  -- 'warp', 'weft', 'both'
-        count REAL,
-        denier REAL,
-        price_per_kg REAL NOT NULL,
-        valid_from TEXT NOT NULL  -- ISO date string
-    );
-    """)
-
-    # Qualities / costings table
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS qualities (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        created_at TEXT NOT NULL,
-        quality_name TEXT NOT NULL,
-
-        -- warp inputs
-        ends_mode TEXT NOT NULL,           -- 'direct' or 'calc'
-        ends REAL,
-        reed REAL,
-        rs REAL,
-        borders REAL,
-        warp_denier REAL NOT NULL,
-        warp_yarn_name TEXT,
-        warp_yarn_price REAL NOT NULL,
-
-        -- weft inputs
-        picks REAL NOT NULL,
-        weft_rs REAL NOT NULL,
-        weft_denier_mode TEXT NOT NULL,    -- 'denier' or 'count'
-        weft_denier REAL NOT NULL,
-        weft_count REAL,
-        weft_yarn_name TEXT,
-        weft_yarn_price REAL NOT NULL,
-
-        -- charges & markups
-        weaving_rate_per_pick REAL NOT NULL,
-        grey_markup_percent REAL NOT NULL,
-        rfd_charge_per_m REAL NOT NULL,
-        rfd_shortage_percent REAL NOT NULL,   -- used as Rs/m now
-        rfd_markup_percent REAL NOT NULL,
-
-        -- outputs (per 100 m)
-        warp_weight_100 REAL NOT NULL,
-        weft_weight_100 REAL NOT NULL,
-        fabric_weight_100 REAL NOT NULL,
-        warp_cost_100 REAL NOT NULL,
-        weft_cost_100 REAL NOT NULL,
-        weaving_charge_100 REAL NOT NULL,
-        interest_on_yarn_100 REAL NOT NULL,
-        final_grey_cost_100 REAL NOT NULL,
-        grey_sale_100 REAL NOT NULL,
-        rfd_cost_100 REAL NOT NULL,
-        rfd_sale_100 REAL NOT NULL
-    );
-    """)
-    # ✅ New: column for multi-weft data
-    try:
-        cur.execute("ALTER TABLE qualities ADD COLUMN wefts_json TEXT;")
-    except sqlite3.OperationalError:
-        pass
-
-    conn.commit()
-    conn.close()
+    """
+    On Supabase we create tables using the Supabase SQL editor.
+    This function is now a no-op (kept only so the rest of the code still calls it).
+    """
+    pass
 
 init_db()
 
 # ---------------------------
-# Helper functions
+# Helper functions (Postgres)
 # ---------------------------
 
 def get_latest_yarn_price(name, yarn_type=None):
@@ -130,16 +74,16 @@ def get_latest_yarn_price(name, yarn_type=None):
         cur.execute("""
             SELECT price_per_kg, denier, count
             FROM yarn_prices
-            WHERE name = ? AND (yarn_type = ? OR yarn_type = 'both')
-            ORDER BY date(valid_from) DESC, id DESC
+            WHERE name = %s AND (yarn_type = %s OR yarn_type = 'both')
+            ORDER BY valid_from DESC, id DESC
             LIMIT 1
         """, (name, yarn_type))
     else:
         cur.execute("""
             SELECT price_per_kg, denier, count
             FROM yarn_prices
-            WHERE name = ?
-            ORDER BY date(valid_from) DESC, id DESC
+            WHERE name = %s
+            ORDER BY valid_from DESC, id DESC
             LIMIT 1
         """, (name,))
     row = cur.fetchone()
@@ -148,13 +92,14 @@ def get_latest_yarn_price(name, yarn_type=None):
         return row[0], row[1], row[2]
     return None, None, None
 
+
 def list_yarn_names(yarn_type=None):
     conn = get_conn()
     cur = conn.cursor()
     if yarn_type:
         cur.execute("""
             SELECT DISTINCT name FROM yarn_prices
-            WHERE yarn_type = ? OR yarn_type = 'both'
+            WHERE yarn_type = %s OR yarn_type = 'both'
             ORDER BY name
         """, (yarn_type,))
     else:
@@ -166,15 +111,17 @@ def list_yarn_names(yarn_type=None):
     conn.close()
     return names
 
+
 def save_yarn_price(name, yarn_type, count, denier, price_per_kg, valid_from):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO yarn_prices (name, yarn_type, count, denier, price_per_kg, valid_from)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s)
     """, (name, yarn_type, count, denier, price_per_kg, valid_from))
     conn.commit()
     conn.close()
+
 
 def get_latest_yarn_row(name, yarn_type=None):
     """
@@ -187,16 +134,16 @@ def get_latest_yarn_row(name, yarn_type=None):
         cur.execute("""
             SELECT id, name, yarn_type, count, denier, price_per_kg, valid_from
             FROM yarn_prices
-            WHERE name = ? AND (yarn_type = ? OR yarn_type = 'both')
-            ORDER BY date(valid_from) DESC, id DESC
+            WHERE name = %s AND (yarn_type = %s OR yarn_type = 'both')
+            ORDER BY valid_from DESC, id DESC
             LIMIT 1
         """, (name, yarn_type))
     else:
         cur.execute("""
             SELECT id, name, yarn_type, count, denier, price_per_kg, valid_from
             FROM yarn_prices
-            WHERE name = ?
-            ORDER BY date(valid_from) DESC, id DESC
+            WHERE name = %s
+            ORDER BY valid_from DESC, id DESC
             LIMIT 1
         """, (name,))
     row = cur.fetchone()
@@ -213,81 +160,29 @@ def get_latest_yarn_row(name, yarn_type=None):
         "valid_from": row[6],
     }
 
-def update_yarn_row(row_id, name, yarn_type, count, denier, price_per_kg, valid_from):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        UPDATE yarn_prices
-        SET name = ?, yarn_type = ?, count = ?, denier = ?, price_per_kg = ?, valid_from = ?
-        WHERE id = ?
-    """, (name, yarn_type, count, denier, price_per_kg, valid_from, row_id))
-    conn.commit()
-    conn.close()
-
-def delete_yarn_completely(name):
-    """Delete ALL rows with this yarn name."""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM yarn_prices WHERE name = ?", (name,))
-    conn.commit()
-    conn.close()
-
-def get_latest_yarn_row(name, yarn_type=None):
-    """
-    Returns full latest row for this yarn (id, name, yarn_type, count, denier, price_per_kg, valid_from)
-    """
-    conn = get_conn()
-    cur = conn.cursor()
-    if yarn_type:
-        cur.execute("""
-            SELECT id, name, yarn_type, count, denier, price_per_kg, valid_from
-            FROM yarn_prices
-            WHERE name = ? AND (yarn_type = ? OR yarn_type = 'both')
-            ORDER BY date(valid_from) DESC, id DESC
-            LIMIT 1
-        """, (name, yarn_type))
-    else:
-        cur.execute("""
-            SELECT id, name, yarn_type, count, denier, price_per_kg, valid_from
-            FROM yarn_prices
-            WHERE name = ?
-            ORDER BY date(valid_from) DESC, id DESC
-            LIMIT 1
-        """, (name,))
-    row = cur.fetchone()
-    conn.close()
-    if not row:
-        return None
-    return {
-        "id": row[0],
-        "name": row[1],
-        "yarn_type": row[2],
-        "count": row[3],
-        "denier": row[4],
-        "price_per_kg": row[5],
-        "valid_from": row[6],
-    }
 
 def update_yarn_row(row_id, name, yarn_type, count, denier, price_per_kg, valid_from):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
         UPDATE yarn_prices
-        SET name = ?, yarn_type = ?, count = ?, denier = ?, price_per_kg = ?, valid_from = ?
-        WHERE id = ?
+        SET name = %s, yarn_type = %s, count = %s, denier = %s, price_per_kg = %s, valid_from = %s
+        WHERE id = %s
     """, (name, yarn_type, count, denier, price_per_kg, valid_from, row_id))
     conn.commit()
     conn.close()
 
+
 def delete_yarn_completely(name):
     """
-    Delete ALL rows for this yarn name (in case you want to wipe it).
+    Delete ALL rows for this yarn name.
     """
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("DELETE FROM yarn_prices WHERE name = ?", (name,))
+    cur.execute("DELETE FROM yarn_prices WHERE name = %s", (name,))
     conn.commit()
     conn.close()
+
 
 def list_all_qualities():
     conn = get_conn()
@@ -295,23 +190,33 @@ def list_all_qualities():
     cur.execute("""
         SELECT id, quality_name, created_at
         FROM qualities
-        ORDER BY quality_name COLLATE NOCASE
+        ORDER BY quality_name
     """)
     rows = cur.fetchall()
     conn.close()
     return rows
 
+
 def get_quality_by_id(q_id):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("PRAGMA table_info(qualities)")
-    cols = [c[1] for c in cur.fetchall()]
-    cur.execute("SELECT * FROM qualities WHERE id = ?", (q_id,))
+
+    # Get column names from Postgres information_schema
+    cur.execute("""
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'qualities'
+        ORDER BY ordinal_position
+    """)
+    cols = [r[0] for r in cur.fetchall()]
+
+    cur.execute("SELECT * FROM qualities WHERE id = %s", (q_id,))
     row = cur.fetchone()
     conn.close()
     if row:
         return dict(zip(cols, row))
     return None
+
 
 def save_quality(data):
     conn = get_conn()
@@ -332,7 +237,20 @@ def save_quality(data):
             grey_sale_100, rfd_cost_100, rfd_sale_100,
             wefts_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (
+            %s, %s,
+            %s, %s, %s, %s, %s, %s,
+            %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s,
+            %s, %s,
+            %s, %s, %s,
+            %s, %s, %s,
+            %s, %s, %s,
+            %s, %s,
+            %s, %s, %s,
+            %s
+        )
     """, (
         data["created_at"], data["quality_name"],
         data["ends_mode"], data["ends"], data["reed"], data["rs"], data["borders"], data["warp_denier"],
@@ -345,11 +263,12 @@ def save_quality(data):
         data["warp_cost_100"], data["weft_cost_100"], data["weaving_charge_100"],
         data["interest_on_yarn_100"], data["final_grey_cost_100"],
         data["grey_sale_100"], data["rfd_cost_100"], data["rfd_sale_100"],
-        data.get("wefts_json")  # 👈 new
+        data.get("wefts_json")
     ))
 
     conn.commit()
     conn.close()
+
 
 def update_quality(q_id, data):
     conn = get_conn()
@@ -357,20 +276,19 @@ def update_quality(q_id, data):
 
     cur.execute("""
         UPDATE qualities SET
-            created_at = ?,
-            quality_name = ?,
-            ends_mode = ?, ends = ?, reed = ?, rs = ?, borders = ?, warp_denier = ?,
-            warp_yarn_name = ?, warp_yarn_price = ?,
-            picks = ?, weft_rs = ?, weft_denier_mode = ?, weft_denier = ?, weft_count = ?,
-            weft_yarn_name = ?, weft_yarn_price = ?,
-            weaving_rate_per_pick = ?, grey_markup_percent = ?,
-            rfd_charge_per_m = ?, rfd_shortage_percent = ?, rfd_markup_percent = ?,
-            warp_weight_100 = ?, weft_weight_100 = ?, fabric_weight_100 = ?,
-            warp_cost_100 = ?, weft_cost_100 = ?, weaving_charge_100 = ?,
-            interest_on_yarn_100 = ?, final_grey_cost_100 = ?,
-            grey_sale_100 = ?, rfd_cost_100 = ?, rfd_sale_100 = ?,
-            wefts_json = ?
-        WHERE id = ?
+            created_at = %s,
+            quality_name = %s,
+            ends_mode = %s, ends = %s, reed = %s, rs = %s, borders = %s, warp_denier = %s,
+            warp_yarn_name = %s, warp_yarn_price = %s,
+            picks = %s, weft_rs = %s, weft_denier_mode = %s, weft_denier = %s, weft_count = %s,
+            weft_yarn_name = %s, weft_yarn_price = %s,
+            weaving_rate_per_pick = %s, grey_markup_percent = %s,
+            rfd_charge_per_m = %s, rfd_shortage_percent = %s, rfd_markup_percent = %s,
+            warp_weight_100 = %s, weft_weight_100 = %s, fabric_weight_100 = %s,
+            warp_cost_100 = %s, weft_cost_100 = %s, weaving_charge_100 = %s,
+            interest_on_yarn_100 = %s, final_grey_cost_100 = %s,
+            grey_sale_100 = %s, rfd_cost_100 = %s, rfd_sale_100 = %s
+        WHERE id = %s
     """, (
         data["created_at"], data["quality_name"],
         data["ends_mode"], data["ends"], data["reed"], data["rs"], data["borders"], data["warp_denier"],
@@ -383,18 +301,18 @@ def update_quality(q_id, data):
         data["warp_cost_100"], data["weft_cost_100"], data["weaving_charge_100"],
         data["interest_on_yarn_100"], data["final_grey_cost_100"],
         data["grey_sale_100"], data["rfd_cost_100"], data["rfd_sale_100"],
-        data.get("wefts_json"),
         q_id
     ))
 
     conn.commit()
     conn.close()
 
+
 def delete_quality(q_id):
     """Delete a quality by id."""
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("DELETE FROM qualities WHERE id = ?", (q_id,))
+    cur.execute("DELETE FROM qualities WHERE id = %s", (q_id,))
     conn.commit()
     conn.close()
 
