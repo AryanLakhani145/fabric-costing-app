@@ -2335,7 +2335,7 @@ elif page == "📄 Pricing Sheet":
 
             rows.append({
                 "Quality": q_name,
-                "Weight (warp+shortage, weft no shortage, kg/100m)": round(fabric_weight_cost, 3),
+                "Weight": round(fabric_weight_cost, 3),
                 "Grey Sale (₹/m)": round(cost["grey_sale_per_m"], 2),
                 "RFD Sale (₹/m)": round(cost["rfd_sale_per_m"], 2),
             })
