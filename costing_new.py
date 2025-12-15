@@ -41,7 +41,6 @@ def check_password():
 
 from psycopg2.extras import RealDictCursor  # optional but handy
 
-@st.cache_resource
 def get_conn():
     """
     Open a new connection to Supabase Postgres using the connection string
