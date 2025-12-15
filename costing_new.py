@@ -41,6 +41,7 @@ def check_password():
 
 from psycopg2.extras import RealDictCursor  # optional but handy
 
+@st.cache_resource
 def get_conn():
     """
     Open a new connection to Supabase Postgres using the connection string
@@ -316,7 +317,6 @@ def delete_quality(q_id):
     conn.commit()
     conn.close()
 
-@st.cache_data
 def compute_dynamic_cost(q):
     """
     Recompute costing using the recipe + latest yarn prices.
@@ -1092,7 +1092,7 @@ elif page == "➕ New Costing":
             rfd_markup_percent=float(rfd_markup_percent),
             # 👇 if your calculate_costing has include_interest,
             # uncomment this and make sure include_interest_new exists:
-            # include_interest=include_interest_new,
+            include_interest=include_interest_new,
         )
 
         # 🧾 Save everything, including full wefts as JSON
