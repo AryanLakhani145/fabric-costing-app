@@ -6,7 +6,7 @@ import psycopg2
 import psycopg2.extras
 from datetime import date, datetime
 
-st.caption("🔁 Build: multi-weft v2")
+st.caption("🔁 Build: v3")
 
 # ------------- SIMPLE PASSWORD PROTECTION -------------
 # Set your password here OR via an environment variable
@@ -41,6 +41,7 @@ def check_password():
 
 from psycopg2.extras import RealDictCursor  # optional but handy
 
+@st.cache_resource
 def get_conn():
     """
     Open a new connection to Supabase Postgres using the connection string
@@ -62,7 +63,7 @@ init_db()
 # ---------------------------
 # Helper functions (Postgres)
 # ---------------------------
-
+@st.cache_data(ttl=300)
 def get_latest_yarn_price(name, yarn_type=None):
     """
     Returns (price_per_kg, denier, count) for the most recent record of this yarn.
@@ -92,7 +93,7 @@ def get_latest_yarn_price(name, yarn_type=None):
         return row[0], row[1], row[2]
     return None, None, None
 
-
+@st.cache_data(ttl=300)
 def list_yarn_names(yarn_type=None):
     conn = get_conn()
     cur = conn.cursor()
@@ -183,7 +184,7 @@ def delete_yarn_completely(name):
     conn.commit()
     conn.close()
 
-
+@st.cache_data(ttl=120)
 def list_all_qualities():
     conn = get_conn()
     cur = conn.cursor()
@@ -196,7 +197,7 @@ def list_all_qualities():
     conn.close()
     return rows
 
-
+@st.cache_data(ttl=120)
 def get_quality_by_id(q_id):
     conn = get_conn()
     cur = conn.cursor()
@@ -316,6 +317,7 @@ def delete_quality(q_id):
     conn.commit()
     conn.close()
 
+@st.cache_data
 def compute_dynamic_cost(q):
     """
     Recompute costing using the recipe + latest yarn prices.
