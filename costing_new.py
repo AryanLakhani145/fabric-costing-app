@@ -63,7 +63,7 @@ init_db()
 # ---------------------------
 # Helper functions (Postgres)
 # ---------------------------
-@st.cache_data(ttl=300)
+
 def get_latest_yarn_price(name, yarn_type=None):
     """
     Returns (price_per_kg, denier, count) for the most recent record of this yarn.
@@ -93,7 +93,6 @@ def get_latest_yarn_price(name, yarn_type=None):
         return row[0], row[1], row[2]
     return None, None, None
 
-@st.cache_data(ttl=300)
 def list_yarn_names(yarn_type=None):
     conn = get_conn()
     cur = conn.cursor()
@@ -184,7 +183,6 @@ def delete_yarn_completely(name):
     conn.commit()
     conn.close()
 
-@st.cache_data(ttl=120)
 def list_all_qualities():
     conn = get_conn()
     cur = conn.cursor()
@@ -197,7 +195,6 @@ def list_all_qualities():
     conn.close()
     return rows
 
-@st.cache_data(ttl=120)
 def get_quality_by_id(q_id):
     conn = get_conn()
     cur = conn.cursor()
