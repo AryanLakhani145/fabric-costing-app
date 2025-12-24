@@ -2370,8 +2370,8 @@ elif page == "🔍 Search Qualities":
                                 st.error("Update failed")
                                 st.exception(e)
                                 st.stop()
-
-                            
+                            st.session_state["quality_updated"] = True
+                            st.success("Quality updated (overwritten).")
                             
 
                     # 🔥 Delete button (outside the form)
