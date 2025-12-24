@@ -722,7 +722,14 @@ if "scratch_weft_rows" not in st.session_state:
 
 page = st.sidebar.radio(
     "Go to",
-    ["➕ New Costing", "🔁 What-if Costing", "🧶 Yarn Prices", "🔍 Search Qualities", "📄 Pricing Sheet"]
+    [
+        "➕ New Costing",
+        "🔁 What-if Costing",
+        "🧶 Yarn Prices",
+        "🔍 Search Qualities",
+        "📄 Pricing Sheet",
+        "📊 Costing Sheet"
+    ]
 )
 
 # ---------------------------
@@ -2427,5 +2434,61 @@ elif page == "📄 Pricing Sheet":
                 "Download as CSV",
                 data=csv,
                 file_name="pricing_sheet.csv",
+                mime="text/csv"
+            )
+
+# ---------------------------
+# Page: Costing Sheet
+# ---------------------------
+elif page == "📊 Costing Sheet":
+    st.header("📊 Costing Sheet")
+
+    qualities = list_all_qualities()
+    if not qualities:
+        st.info("No qualities saved yet.")
+    else:
+        import pandas as pd
+
+        rows = []
+
+        for q_id, q_name, created_at in qualities:
+            q = get_quality_by_id(q_id)
+            if not q:
+                continue
+
+            # 🔥 Dynamic recompute (latest yarn prices + multi-weft)
+            cost = compute_dynamic_cost(q)
+
+            warp_w_100 = cost["warp_weight_100"]
+            weft_w_100 = cost["weft_weight_100"]
+
+            # SAME weight logic as pricing sheet
+            fabric_weight_costing = warp_w_100 * 1.09 + weft_w_100
+
+            # 🔑 Picks: use dynamic total picks if present
+            total_picks = cost.get("_dynamic_total_picks", q.get("picks"))
+
+            rows.append({
+                "Quality": q_name,
+                "Weight": round(fabric_weight_costing, 3),
+                "Grey Cost (₹/m)": round(cost["grey_cost_per_m"], 2),
+                "Grey Sale (₹/m)": round(cost["grey_sale_per_m"], 2),
+                "RFD Cost (₹/m)": round(cost["rfd_cost_per_m"], 2),
+                "RFD Sale (₹/m)": round(cost["rfd_sale_per_m"], 2),
+                "Reed": q.get("reed"),
+                "Picks": round(total_picks, 1) if total_picks is not None else None,
+            })
+
+        if not rows:
+            st.info("No qualities found.")
+        else:
+            df = pd.DataFrame(rows)
+            st.dataframe(df, use_container_width=True)
+
+            csv = df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Download as CSV",
+                data=csv,
+                file_name="costing_sheet.csv",
                 mime="text/csv"
             )
