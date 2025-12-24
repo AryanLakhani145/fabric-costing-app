@@ -1866,7 +1866,8 @@ elif page == "🔍 Search Qualities":
             selected_id = label_to_id[selected_label]
             q = get_quality_by_id(selected_id)
 
-            if st.session_state.pop("quality_updated", False):
+            updated = st.session_state.pop("quality_updated", False)
+            if updated:
                 st.success("✅ Quality updated successfully")
 
                 # SINGLE radio with explicit key to avoid duplicate id
