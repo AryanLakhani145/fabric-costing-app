@@ -65,6 +65,25 @@ init_db()
 # ---------------------------
 
 @st.cache_data(ttl=300)
+def list_all_qualities_full():
+    """
+    Fetch ALL qualities with all columns in one query.
+    Returns: list of dicts (same shape as get_quality_by_id)
+    """
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    cur.execute("""
+        SELECT *
+        FROM qualities
+        ORDER BY quality_name
+    """)
+
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+@st.cache_data(ttl=300)
 def get_latest_yarn_price_map():
     """
     Fetch latest yarn prices ONCE and cache them.
@@ -424,7 +443,7 @@ def compute_dynamic_cost(q):
     - Falls back to single-weft fields if not.
     """
     yarn_price_map = get_latest_yarn_price_map()
-    
+
     # --- Warp: dynamic price & optional denier from yarn table ---
     warp_denier = float(q["warp_denier"]) if q["warp_denier"] is not None else 0.0
     warp_price = float(q["warp_yarn_price"]) if q["warp_yarn_price"] is not None else 0.0
@@ -2440,10 +2459,8 @@ elif page == "📄 Pricing Sheet":
         import pandas as pd
 
         rows = []
-        for q_id, q_name, created_at in qualities:
-            q = get_quality_by_id(q_id)
-            if not q:
-                continue
+        for q in qualities:
+            q_name = q["quality_name"]
 
             # 🔥 dynamic recalc using latest yarn prices + multi-weft
             cost = compute_dynamic_cost(q)
@@ -2489,10 +2506,8 @@ elif page == "📊 Costing Sheet":
 
         rows = []
 
-        for q_id, q_name, created_at in qualities:
-            q = get_quality_by_id(q_id)
-            if not q:
-                continue
+        for q in qualities:
+            q_name = q["quality_name"]
 
             # 🔥 Dynamic recompute (latest yarn prices + multi-weft)
             cost = compute_dynamic_cost(q)
