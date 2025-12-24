@@ -2372,7 +2372,7 @@ elif page == "🔍 Search Qualities":
                                 st.stop()
 
                             
-                            st.rerun() 
+                            
 
                     # 🔥 Delete button (outside the form)
                     if st.button(
