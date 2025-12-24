@@ -233,6 +233,7 @@ def save_quality(data):
             warp_cost_100, weft_cost_100, weaving_charge_100,
             interest_on_yarn_100, final_grey_cost_100,
             grey_sale_100, rfd_cost_100, rfd_sale_100,
+            include_interest,
             wefts_json
         )
         VALUES (
@@ -261,6 +262,7 @@ def save_quality(data):
         data["warp_cost_100"], data["weft_cost_100"], data["weaving_charge_100"],
         data["interest_on_yarn_100"], data["final_grey_cost_100"],
         data["grey_sale_100"], data["rfd_cost_100"], data["rfd_sale_100"],
+        data["include_interest"],
         data.get("wefts_json")
     ))
 
@@ -284,7 +286,7 @@ def update_quality(q_id, data):
             rfd_charge_per_m = %s, rfd_shortage_percent = %s, rfd_markup_percent = %s,
             warp_weight_100 = %s, weft_weight_100 = %s, fabric_weight_100 = %s,
             warp_cost_100 = %s, weft_cost_100 = %s, weaving_charge_100 = %s,
-            interest_on_yarn_100 = %s, final_grey_cost_100 = %s,
+            interest_on_yarn_100 = %s, include_interest = %s, final_grey_cost_100 = %s,
             grey_sale_100 = %s, rfd_cost_100 = %s, rfd_sale_100 = %s
         WHERE id = %s
     """, (
@@ -299,6 +301,7 @@ def update_quality(q_id, data):
         data["warp_cost_100"], data["weft_cost_100"], data["weaving_charge_100"],
         data["interest_on_yarn_100"], data["final_grey_cost_100"],
         data["grey_sale_100"], data["rfd_cost_100"], data["rfd_sale_100"],
+        data["include_interest"],
         q_id
     ))
 
@@ -459,6 +462,7 @@ def compute_dynamic_cost(q):
         rfd_charge_per_m=rfd_charge,
         rfd_shortage_percent=rfd_short,
         rfd_markup_percent=rfd_markup,
+        include_interest=bool(q.get("include_interest", True)),
     )
 
     # Also return the aggregated weft info in case UI wants it
@@ -1127,6 +1131,7 @@ elif page == "➕ New Costing":
             "weft_cost_100": cost["weft_cost_100"],
             "weaving_charge_100": cost["weaving_charge_100"],
             "interest_on_yarn_100": cost["interest_on_yarn_100"],
+            "include_interest": include_interest_new,
             "final_grey_cost_100": cost["final_grey_cost_100"],
             "grey_sale_100": cost["grey_sale_100"],
             "rfd_cost_100": cost["rfd_cost_100"],
@@ -2164,7 +2169,7 @@ elif page == "🔍 Search Qualities":
                             )
                             include_interest_edit = st.checkbox(
                                 "Include 4% interest on yarn in grey cost",
-                                value=True,
+                                value=bool(q.get("include_interest", True)),
                                 key="include_interest_edit"
                             )
 
@@ -2288,12 +2293,14 @@ elif page == "🔍 Search Qualities":
                                 "grey_sale_100": cost["grey_sale_100"],
                                 "rfd_cost_100": cost["rfd_cost_100"],
                                 "rfd_sale_100": cost["rfd_sale_100"],
+                                "include_interest": include_interest_edit,
 
                                 "wefts_json": json.dumps(valid_wefts),
                             }
 
                             update_quality(selected_id, upd)
                             st.success("Quality updated (overwritten).")
+                            st.rerun() 
 
                     # 🔥 Delete button (outside the form)
                     if st.button(
