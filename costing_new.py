@@ -286,8 +286,8 @@ def update_quality(q_id, data):
             rfd_charge_per_m = %s, rfd_shortage_percent = %s, rfd_markup_percent = %s,
             warp_weight_100 = %s, weft_weight_100 = %s, fabric_weight_100 = %s,
             warp_cost_100 = %s, weft_cost_100 = %s, weaving_charge_100 = %s,
-            interest_on_yarn_100 = %s, include_interest = %s, final_grey_cost_100 = %s,
-            grey_sale_100 = %s, rfd_cost_100 = %s, rfd_sale_100 = %s
+            interest_on_yarn_100 = %s, final_grey_cost_100 = %s,
+            grey_sale_100 = %s, rfd_cost_100 = %s, rfd_sale_100 = %s, include_interest = %s
         WHERE id = %s
     """, (
         data["created_at"], data["quality_name"],
