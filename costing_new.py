@@ -2452,7 +2452,7 @@ elif page == "🔍 Search Qualities":
 elif page == "📄 Pricing Sheet":
     st.header("📄 Pricing Sheet")
 
-    qualities = list_all_qualities()
+    qualities = list_all_qualities_full()
     if not qualities:
         st.info("No qualities saved yet.")
     else:
@@ -2498,7 +2498,7 @@ elif page == "📄 Pricing Sheet":
 elif page == "📊 Costing Sheet":
     st.header("📊 Costing Sheet")
 
-    qualities = list_all_qualities()
+    qualities = list_all_qualities_full()
     if not qualities:
         st.info("No qualities saved yet.")
     else:
