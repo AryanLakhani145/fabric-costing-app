@@ -278,29 +278,95 @@ def update_quality(q_id, data):
         UPDATE qualities SET
             created_at = %s,
             quality_name = %s,
-            ends_mode = %s, ends = %s, reed = %s, rs = %s, borders = %s, warp_denier = %s,
-            warp_yarn_name = %s, warp_yarn_price = %s,
-            picks = %s, weft_rs = %s, weft_denier_mode = %s, weft_denier = %s, weft_count = %s,
-            weft_yarn_name = %s, weft_yarn_price = %s,
-            weaving_rate_per_pick = %s, grey_markup_percent = %s,
-            rfd_charge_per_m = %s, rfd_shortage_percent = %s, rfd_markup_percent = %s,
-            warp_weight_100 = %s, weft_weight_100 = %s, fabric_weight_100 = %s,
-            warp_cost_100 = %s, weft_cost_100 = %s, weaving_charge_100 = %s,
-            interest_on_yarn_100 = %s, final_grey_cost_100 = %s,
-            grey_sale_100 = %s, rfd_cost_100 = %s, rfd_sale_100 = %s, include_interest = %s
+
+            ends_mode = %s,
+            ends = %s,
+            reed = %s,
+            rs = %s,
+            borders = %s,
+            warp_denier = %s,
+
+            warp_yarn_name = %s,
+            warp_yarn_price = %s,
+
+            picks = %s,
+            weft_rs = %s,
+            weft_denier_mode = %s,
+            weft_denier = %s,
+            weft_count = %s,
+
+            weft_yarn_name = %s,
+            weft_yarn_price = %s,
+
+            weaving_rate_per_pick = %s,
+            grey_markup_percent = %s,
+
+            rfd_charge_per_m = %s,
+            rfd_shortage_percent = %s,
+            rfd_markup_percent = %s,
+
+            warp_weight_100 = %s,
+            weft_weight_100 = %s,
+            fabric_weight_100 = %s,
+
+            warp_cost_100 = %s,
+            weft_cost_100 = %s,
+            weaving_charge_100 = %s,
+
+            interest_on_yarn_100 = %s,
+            final_grey_cost_100 = %s,
+            grey_sale_100 = %s,
+            rfd_cost_100 = %s,
+            rfd_sale_100 = %s,
+
+            wefts_json = %s,
+            include_interest = %s
         WHERE id = %s
     """, (
-        data["created_at"], data["quality_name"],
-        data["ends_mode"], data["ends"], data["reed"], data["rs"], data["borders"], data["warp_denier"],
-        data["warp_yarn_name"], data["warp_yarn_price"],
-        data["picks"], data["weft_rs"], data["weft_denier_mode"], data["weft_denier"], data["weft_count"],
-        data["weft_yarn_name"], data["weft_yarn_price"],
-        data["weaving_rate_per_pick"], data["grey_markup_percent"],
-        data["rfd_charge_per_m"], data["rfd_shortage_percent"], data["rfd_markup_percent"],
-        data["warp_weight_100"], data["weft_weight_100"], data["fabric_weight_100"],
-        data["warp_cost_100"], data["weft_cost_100"], data["weaving_charge_100"],
-        data["interest_on_yarn_100"], data["final_grey_cost_100"],
-        data["grey_sale_100"], data["rfd_cost_100"], data["rfd_sale_100"],
+        data["created_at"],
+        data["quality_name"],
+
+        data["ends_mode"],
+        data["ends"],
+        data["reed"],
+        data["rs"],
+        data["borders"],
+        data["warp_denier"],
+
+        data["warp_yarn_name"],
+        data["warp_yarn_price"],
+
+        data["picks"],
+        data["weft_rs"],
+        data["weft_denier_mode"],
+        data["weft_denier"],
+        data["weft_count"],
+
+        data["weft_yarn_name"],
+        data["weft_yarn_price"],
+
+        data["weaving_rate_per_pick"],
+        data["grey_markup_percent"],
+
+        data["rfd_charge_per_m"],
+        data["rfd_shortage_percent"],
+        data["rfd_markup_percent"],
+
+        data["warp_weight_100"],
+        data["weft_weight_100"],
+        data["fabric_weight_100"],
+
+        data["warp_cost_100"],
+        data["weft_cost_100"],
+        data["weaving_charge_100"],
+
+        data["interest_on_yarn_100"],
+        data["final_grey_cost_100"],
+        data["grey_sale_100"],
+        data["rfd_cost_100"],
+        data["rfd_sale_100"],
+
+        data.get("wefts_json"),
         bool(data["include_interest"]),
         q_id
     ))
@@ -2298,7 +2364,13 @@ elif page == "🔍 Search Qualities":
                                 "wefts_json": json.dumps(valid_wefts),
                             }
 
-                            update_quality(selected_id, upd)
+                            try:
+                                update_quality(selected_id, upd)
+                            except Exception as e:
+                                st.error("Update failed")
+                                st.exception(e)
+                                st.stop()
+
                             st.success("Quality updated (overwritten).")
                             st.rerun() 
 
