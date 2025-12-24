@@ -417,12 +417,14 @@ def delete_quality(q_id):
     conn.close()
 
 def compute_dynamic_cost(q):
-    yarn_price_map = get_latest_yarn_price_map()
+    
     """
     Recompute costing using the recipe + latest yarn prices.
     - Uses wefts_json if present (multi-weft).
     - Falls back to single-weft fields if not.
     """
+    yarn_price_map = get_latest_yarn_price_map()
+    
     # --- Warp: dynamic price & optional denier from yarn table ---
     warp_denier = float(q["warp_denier"]) if q["warp_denier"] is not None else 0.0
     warp_price = float(q["warp_yarn_price"]) if q["warp_yarn_price"] is not None else 0.0
