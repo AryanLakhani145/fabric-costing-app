@@ -1272,7 +1272,7 @@ elif page == "➕ New Costing":
         }
 
         save_quality(data)
-
+        st.cache_data.clear()
         st.success("Costing calculated and saved.")
 
         st.markdown("### Results (per meter)")
@@ -2430,6 +2430,7 @@ elif page == "🔍 Search Qualities":
 
                             try:
                                 update_quality(selected_id, upd)
+                                st.cache_data.clear()
                             except Exception as e:
                                 st.error("Update failed")
                                 st.exception(e)
@@ -2444,6 +2445,7 @@ elif page == "🔍 Search Qualities":
                         key=f"delete_quality_{selected_id}"
                     ):
                         delete_quality(selected_id)
+                        st.cache_data.clear()
                         st.success(f"Quality '{q['quality_name']}' deleted.")
 
 # ---------------------------
