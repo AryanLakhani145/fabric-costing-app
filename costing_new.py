@@ -301,7 +301,7 @@ def update_quality(q_id, data):
         data["warp_cost_100"], data["weft_cost_100"], data["weaving_charge_100"],
         data["interest_on_yarn_100"], data["final_grey_cost_100"],
         data["grey_sale_100"], data["rfd_cost_100"], data["rfd_sale_100"],
-        data["include_interest"],
+        bool(data["include_interest"]),
         q_id
     ))
 
