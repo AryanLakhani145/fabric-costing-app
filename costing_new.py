@@ -1866,9 +1866,8 @@ elif page == "🔍 Search Qualities":
             selected_id = label_to_id[selected_label]
             q = get_quality_by_id(selected_id)
 
-            if q:
-                st.markdown(f"### {q['quality_name']}")
-                st.caption(f"Created at: {q['created_at']}")
+            if st.session_state.pop("quality_updated", False):
+                st.success("✅ Quality updated successfully")
 
                 # SINGLE radio with explicit key to avoid duplicate id
                 view_mode = st.radio(
@@ -2371,7 +2370,7 @@ elif page == "🔍 Search Qualities":
                                 st.exception(e)
                                 st.stop()
 
-                            st.success("Quality updated (overwritten).")
+                            st.session_state["quality_updated"] = True
                             st.rerun() 
 
                     # 🔥 Delete button (outside the form)
