@@ -64,6 +64,39 @@ init_db()
 # Helper functions (Postgres)
 # ---------------------------
 
+@st.cache_data(ttl=300)
+def get_latest_yarn_price_map():
+    """
+    Fetch latest yarn prices ONCE and cache them.
+    Key: (name, yarn_type)
+    Value: dict with price_per_kg, denier, count
+    """
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    cur.execute("""
+        SELECT DISTINCT ON (name, yarn_type)
+            name, yarn_type, price_per_kg, denier, count
+        FROM yarn_prices
+        ORDER BY name, yarn_type, valid_from DESC, id DESC
+    """)
+
+    rows = cur.fetchall()
+    conn.close()
+
+    price_map = {}
+
+    for r in rows:
+        # exact type
+        price_map[(r["name"], r["yarn_type"])] = r
+
+        # fallback: treat "both" as warp + weft
+        if r["yarn_type"] == "both":
+            price_map[(r["name"], "warp")] = r
+            price_map[(r["name"], "weft")] = r
+
+    return price_map
+
 def get_latest_yarn_price(name, yarn_type=None):
     """
     Returns (price_per_kg, denier, count) for the most recent record of this yarn.
@@ -384,6 +417,7 @@ def delete_quality(q_id):
     conn.close()
 
 def compute_dynamic_cost(q):
+    yarn_price_map = get_latest_yarn_price_map()
     """
     Recompute costing using the recipe + latest yarn prices.
     - Uses wefts_json if present (multi-weft).
@@ -394,11 +428,12 @@ def compute_dynamic_cost(q):
     warp_price = float(q["warp_yarn_price"]) if q["warp_yarn_price"] is not None else 0.0
 
     if q.get("warp_yarn_name"):
-        latest_price, latest_dnr, latest_cnt = get_latest_yarn_price(q["warp_yarn_name"], "warp")
-        if latest_price:
-            warp_price = latest_price
-        if latest_dnr:
-            warp_denier = latest_dnr  # if you want denier to follow yarn table
+        row = yarn_price_map.get((q["warp_yarn_name"], "warp"))
+        if row:
+            if row["price_per_kg"] is not None:
+                warp_price = row["price_per_kg"]
+            if row["denier"] is not None:
+                warp_denier = row["denier"]  # if you want denier to follow yarn table
 
     ends = float(q["ends"])
     rs = float(q["rs"])
@@ -425,17 +460,18 @@ def compute_dynamic_cost(q):
 
             # Override from yarn table if yarn_name is linked
             if yarn_name and yarn_name != "(manual price)":
-                latest_price, latest_dnr, latest_cnt = get_latest_yarn_price(yarn_name, "weft")
-                if latest_price:
-                    price = latest_price
-                if mode == "denier" and latest_dnr:
-                    d = latest_dnr
-                if mode == "count":
-                    # Prefer count from yarn table, then convert to denier
-                    if latest_cnt:
-                        cnt = latest_cnt
-                    if cnt and cnt > 0:
-                        d = 5315.0 / cnt
+                row = yarn_price_map.get((yarn_name, "weft"))
+                if row:
+                    if row["price_per_kg"] is not None:
+                        price = row["price_per_kg"]
+
+                    if mode == "denier" and row["denier"]:
+                        d = row["denier"]
+
+                    if mode == "count":
+                        cnt = row["count"]
+                        if cnt and cnt > 0:
+                            d = 5315.0 / cnt
 
             # per-weft technical weight / 100 m (no shortage)
             if p > 0 and d > 0:
@@ -467,16 +503,16 @@ def compute_dynamic_cost(q):
         yarn_name = q.get("weft_yarn_name")
 
         if yarn_name:
-            latest_price, latest_dnr, latest_cnt = get_latest_yarn_price(yarn_name, "weft")
-            if latest_price:
-                price = latest_price
-            if mode == "denier" and latest_dnr:
-                d = latest_dnr
-            if mode == "count":
-                if latest_cnt:
-                    cnt = latest_cnt
-                if cnt and cnt > 0:
-                    d = 5315.0 / cnt
+            row = yarn_price_map.get((yarn_name, "weft"))
+            if row:
+                if row["price_per_kg"] is not None:
+                    price = row["price_per_kg"]
+                if mode == "denier" and row["denier"]:
+                    d = row["denier"]
+                if mode == "count":
+                    cnt = row["count"]
+                    if cnt and cnt > 0:
+                        d = 5315.0 / cnt
 
         if p > 0 and d > 0 and price > 0:
             weft_entries.append({"picks": p, "denier": d, "price": price})
