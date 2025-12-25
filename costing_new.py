@@ -2729,6 +2729,9 @@ elif page == "💰 Deal Margin Calculator":
     interest_gain = result["interest_gain"]
     final_margin = result["profit_per_m"]
 
+show_calc = st.button("🧮 Show margin calculation")
+
+if show_calc:
     st.markdown("### 🧮 Margin Calculation (explicit check)")
 
     bc1, bc2 = st.columns([2, 1])
