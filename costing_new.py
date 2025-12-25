@@ -763,7 +763,7 @@ def calculate_costing_multi_weft(
     }
 
 def calculate_deal_margin(
-    base_cost_per_m,
+    cost_with_interest_per_m,
     interest_per_m,
     deal_price_per_m,
     payment_mode,        # "net" or "discount"
@@ -775,27 +775,28 @@ def calculate_deal_margin(
     discount_amt = deal_price_per_m * (discount_percent / 100.0)
     price_after_discount = deal_price_per_m - discount_amt
 
-    # ---- Brokerage (applied after discount) ----
+    # ---- Brokerage (after discount) ----
     brokerage_amt = price_after_discount * (brokerage_percent / 100.0)
     realised_price = price_after_discount - brokerage_amt
 
-    # ---- Interest logic ----
-    if payment_mode == "discount":
-        effective_cost = base_cost_per_m - interest_per_m
-        interest_gain = interest_per_m * 0.5
-    else:
-        effective_cost = base_cost_per_m
-        interest_gain = 0.0
+    # ---- Interest logic (ONLY CHANGE HERE) ----
+    # Full interest is 4%, but even discounted deals carry ~2%
+    effective_interest = interest_per_m / 2.0
 
-    profit_per_m = realised_price - effective_cost
+    if payment_mode == "discount":
+        actual_cost = cost_with_interest_per_m - effective_interest
+    else:
+        actual_cost = cost_with_interest_per_m
+
+    profit_per_m = realised_price - actual_cost
     total_profit = profit_per_m * quantity_m
 
     return {
         "realised_price": realised_price,
         "discount_amt": discount_amt,
         "brokerage_amt": brokerage_amt,
-        "interest_gain": interest_gain,
-        "effective_cost": effective_cost,
+        "actual_cost": actual_cost,
+        "effective_interest": effective_interest,
         "profit_per_m": profit_per_m,
         "total_profit": total_profit,
     }
@@ -2701,7 +2702,7 @@ elif page == "💰 Deal Margin Calculator":
 
     # ---- Calculate ----
     result = calculate_deal_margin(
-        base_cost_per_m=base_cost,
+        cost_with_interest_per_m=base_cost,
         interest_per_m=interest_per_m,
         deal_price_per_m=deal_price,
         payment_mode=payment_mode,
@@ -2720,13 +2721,11 @@ elif page == "💰 Deal Margin Calculator":
 
     with c2:
         st.write(f"Realised price: ₹{result['realised_price']:.2f} / m")
-        st.write(f"Saved cost (includes interest): ₹{base_cost:.2f} / m")
-        if result["interest_gain"] > 0:
-            st.write(f"Interest benefit: ₹{result['interest_gain']:.2f} / m")
+        st.write(f"Actual cost used: ₹{result['actual_cost']:.2f} / m")
+
 
     # ---- Explicit margin math (hidden by default) ----
-    base_margin = result["realised_price"] - base_cost
-    interest_gain = result["interest_gain"]
+    base_margin = result["realised_price"] - result["actual_cost"]
     final_margin = result["profit_per_m"]
 
     with st.expander("🧮 Show margin calculation"):
@@ -2757,7 +2756,7 @@ elif page == "💰 Deal Margin Calculator":
 
     ### ✅ Final Margin
 
-    ₹{base_margin:.2f} + ₹{interest_gain:.2f}  
+    ₹{result['realised_price']:.2f} − ₹{result['actual_cost']:.2f}  
     = **₹{final_margin:.2f} / m**
     """
             )
@@ -2767,6 +2766,7 @@ elif page == "💰 Deal Margin Calculator":
                 "ℹ️ **How to read this**\n\n"
                 "• Saved cost already includes interest\n"
                 "• Discounted payment removes interest cost\n"
-                "• Interest saved becomes extra margin\n"
-                "• Net payment → interest benefit = 0"
+                "• Cost already includes 4% interest"
+                "• Discounted payment still carries ~2% interest"
+                "• Only half the interest is actually saved"
             )
