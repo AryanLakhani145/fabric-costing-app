@@ -300,7 +300,7 @@ def save_quality(data):
             %s, %s, %s,
             %s, %s,
             %s, %s, %s,
-            %s
+            %s, %s
         )
     """, (
         data["created_at"], data["quality_name"],
@@ -420,7 +420,7 @@ def update_quality(q_id, data):
 
         data.get("wefts_json"),
         bool(data["include_interest"]),
-        q_id
+        data.get("wefts_json")
     ))
 
     conn.commit()
