@@ -2744,11 +2744,11 @@ elif page == "💰 Deal Margin Calculator":
     """
             )
 
-            if interest_gain > 0:
+            if result["interest_gain"] > 0:
                 st.markdown(
     f"""
     **Interest benefit (early payment):**  
-    + ₹{interest_gain:.2f} / m
+    + ₹{result["interest_gain"]:.2f} / m
     """
                 )
 
