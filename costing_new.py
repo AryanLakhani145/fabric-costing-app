@@ -1353,33 +1353,6 @@ elif page == "➕ New Costing":
             st.write(f"RFD cost / 100 m: {cost['rfd_cost_100']:.2f} ₹")
             st.write(f"RFD sale / 100 m: {cost['rfd_sale_100']:.2f} ₹")
 
-            st.success("Costing calculated and saved.")
-
-            st.markdown("### Results (per meter)")
-            grey_cost_per_m = cost["grey_cost_per_m"]
-            grey_sale_per_m = cost["grey_sale_per_m"]
-            rfd_cost_per_m = cost["rfd_cost_per_m"]
-            rfd_sale_per_m = cost["rfd_sale_per_m"]
-
-            c1, c2 = st.columns(2)
-            with c1:
-                st.metric("Grey cost / m (₹)", f"{grey_cost_per_m:.2f}")
-                st.metric("Grey sale / m (₹)", f"{grey_sale_per_m:.2f}")
-                st.metric("RFD cost / m (₹)", f"{rfd_cost_per_m:.2f}")
-                st.metric("RFD sale / m (₹)", f"{rfd_sale_per_m:.2f}")
-            with c2:
-                st.markdown("#### Reference (per 100 m)")
-                st.write(f"Fabric weight / 100 m (no shortage): **{cost['fabric_weight_100']:.3f} kg**")
-                st.write(f"Warp weight / 100 m (no shortage): {cost['warp_weight_100']:.3f} kg")
-                st.write(f"Weft weight / 100 m (no shortage): {cost['weft_weight_100']:.3f} kg")
-                st.write(f"Warp cost / 100 m: {cost['warp_cost_100']:.2f} ₹")
-                st.write(f"Weft cost / 100 m: {cost['weft_cost_100']:.2f} ₹")
-                st.write(f"Weaving charge / 100 m: {cost['weaving_charge_100']:.2f} ₹")
-                st.write(f"Interest on yarn / 100 m: {cost['interest_on_yarn_100']:.2f} ₹")
-                st.write(f"Final grey cost / 100 m: {cost['final_grey_cost_100']:.2f} ₹")
-                st.write(f"Grey sale / 100 m: {cost['grey_sale_100']:.2f} ₹")
-                st.write(f"RFD cost / 100 m: {cost['rfd_cost_100']:.2f} ₹")
-                st.write(f"RFD sale / 100 m: {cost['rfd_sale_100']:.2f} ₹")
 
 # ---------------------------
 # Page: What-if Costing
