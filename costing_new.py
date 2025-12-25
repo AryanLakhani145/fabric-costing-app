@@ -2713,7 +2713,6 @@ elif page == "💰 Deal Margin Calculator":
         quantity_m=quantity_m,
     )
 
-    interest_gain = result["interest_gain"]
 
     # ---- Result summary ----
     st.markdown("### 📊 Result")
@@ -2731,7 +2730,6 @@ elif page == "💰 Deal Margin Calculator":
     # ---- Explicit margin math (hidden by default) ----
     base_margin = result["realised_price"] - base_cost
     final_margin = result["profit_per_m"]
-    interest_gain = result["interest_gain"]
 
     with st.expander("🧮 Show margin calculation"):
         st.markdown("### 🧮 Margin Calculation (explicit check)")
@@ -2747,11 +2745,11 @@ elif page == "💰 Deal Margin Calculator":
     """
             )
 
-            if interest_gain > 0:
+            if result["interest_gain"] > 0:
                 st.markdown(
     f"""
     **Interest benefit (only 2 months saved):**  
-    + ₹{interest_gain:.2f} / m
+    + ₹{result['interest_gain']:.2f} / m
     """
                 )
 
