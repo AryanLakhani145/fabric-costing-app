@@ -675,6 +675,7 @@ def calculate_costing_multi_weft(
     rfd_charge_per_m, rfd_shortage_percent, rfd_markup_percent,
     include_interest=True,
 ):
+    
     """
     Multi-weft version of calculate_costing.
     weft_list = [
@@ -761,6 +762,44 @@ def calculate_costing_multi_weft(
         "rfd_sale_100": rfd_sale_100,
     }
 
+def calculate_deal_margin(
+    base_cost_per_m,
+    interest_per_m,
+    deal_price_per_m,
+    payment_mode,        # "net" or "discount"
+    discount_percent,
+    brokerage_percent,
+    quantity_m,
+):
+    # ---- Discount ----
+    discount_amt = deal_price_per_m * (discount_percent / 100.0)
+    price_after_discount = deal_price_per_m - discount_amt
+
+    # ---- Brokerage (applied after discount) ----
+    brokerage_amt = price_after_discount * (brokerage_percent / 100.0)
+    realised_price = price_after_discount - brokerage_amt
+
+    # ---- Interest logic ----
+    if payment_mode == "discount":
+        effective_cost = base_cost_per_m - interest_per_m
+        interest_gain = interest_per_m
+    else:
+        effective_cost = base_cost_per_m
+        interest_gain = 0.0
+
+    profit_per_m = realised_price - effective_cost
+    total_profit = profit_per_m * quantity_m
+
+    return {
+        "realised_price": realised_price,
+        "discount_amt": discount_amt,
+        "brokerage_amt": brokerage_amt,
+        "interest_gain": interest_gain,
+        "effective_cost": effective_cost,
+        "profit_per_m": profit_per_m,
+        "total_profit": total_profit,
+    }
+
 # ---------------------------
 # Streamlit UI
 # ---------------------------
@@ -785,7 +824,8 @@ page = st.sidebar.radio(
         "🧶 Yarn Prices",
         "🔍 Search Qualities",
         "📄 Pricing Sheet",
-        "📊 Costing Sheet"
+        "📊 Costing Sheet",
+        "💰 Deal Margin Calculator"
     ]
 )
 
@@ -2547,3 +2587,132 @@ elif page == "📊 Costing Sheet":
                 file_name="costing_sheet.csv",
                 mime="text/csv"
             )
+
+# -----------------------------
+# Page: Deal Margin Calculator
+# -----------------------------
+
+elif page == "💰 Deal Margin Calculator":
+    st.header("💰 Deal Margin Calculator")
+
+    qualities = list_all_qualities()
+    if not qualities:
+        st.info("No qualities available.")
+        st.stop()
+
+    label_to_id = {f"{q[1]} (ID {q[0]})": q[0] for q in qualities}
+    labels = ["-- Select quality --"] + list(label_to_id.keys())
+
+    selected_label = st.selectbox("Select quality", labels)
+
+    if selected_label == "-- Select quality --":
+        st.stop()
+
+    q = get_quality_by_id(label_to_id[selected_label])
+    cost = compute_dynamic_cost(q)
+
+    # ---- Sale type ----
+    sale_type = st.radio("Sale type", ["Grey", "RFD"], horizontal=True)
+
+    if sale_type == "Grey":
+        base_cost = cost["grey_cost_per_m"]
+        brokerage_allowed = False
+    else:
+        base_cost = cost["rfd_cost_per_m"]
+        brokerage_allowed = True
+
+    interest_per_m = cost["interest_on_yarn_100"] / 100.0
+
+    # ---- Deal price ----
+    reference_price = (
+        cost["grey_sale_per_m"]
+        if sale_type == "Grey"
+        else cost["rfd_sale_per_m"]
+    )
+
+    deal_price = st.number_input(
+        "Deal selling price (₹ / meter)",
+        min_value=0.0,
+        step=0.1,
+        value=float(reference_price),
+    )
+
+    # ---- Payment terms ----
+    payment_mode_label = st.radio(
+        "Payment terms",
+        ["Net (90–100 days)", "Discounted (early payment)"],
+        horizontal=True,
+    )
+
+    if payment_mode_label.startswith("Discounted"):
+        discount_type = st.radio(
+            "Discount type",
+            ["Standard (5%)", "Custom"],
+            horizontal=True,
+        )
+        discount_percent = 5.0 if discount_type == "Standard (5%)" else st.number_input(
+            "Custom discount %",
+            min_value=0.0,
+            step=0.1,
+            value=5.0,
+        )
+        payment_mode = "discount"
+    else:
+        discount_percent = 0.0
+        payment_mode = "net"
+
+    # ---- Brokerage ----
+    brokerage_percent = 0.0
+    if brokerage_allowed:
+        apply_brokerage = st.checkbox("Apply brokerage")
+        if apply_brokerage:
+            brokerage_choice = st.radio(
+                "Brokerage %",
+                ["1%", "1.5%", "2%", "Custom"],
+                horizontal=True,
+            )
+            if brokerage_choice == "1%":
+                brokerage_percent = 1.0
+            elif brokerage_choice == "1.5%":
+                brokerage_percent = 1.5
+            elif brokerage_choice == "2%":
+                brokerage_percent = 2.0
+            else:
+                brokerage_percent = st.number_input(
+                    "Custom brokerage %",
+                    min_value=0.0,
+                    step=0.1,
+                    value=1.0,
+                )
+
+    # ---- Quantity ----
+    quantity_m = st.number_input(
+        "Quantity (meters)",
+        min_value=0.0,
+        step=100.0,
+        value=1000.0,
+    )
+
+    # ---- Calculate ----
+    result = calculate_deal_margin(
+        base_cost_per_m=base_cost,
+        interest_per_m=interest_per_m,
+        deal_price_per_m=deal_price,
+        payment_mode=payment_mode,
+        discount_percent=discount_percent,
+        brokerage_percent=brokerage_percent,
+        quantity_m=quantity_m,
+    )
+
+    st.markdown("### 📊 Result")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.metric("Profit per meter (₹)", f"{result['profit_per_m']:.2f}")
+        st.metric("Total deal profit (₹)", f"{result['total_profit']:.0f}")
+
+    with c2:
+        st.write(f"Realised price: ₹{result['realised_price']:.2f} / m")
+        st.write(f"Effective cost: ₹{result['effective_cost']:.2f} / m")
+        if result["interest_gain"] > 0:
+            st.write(f"Interest benefit: ₹{result['interest_gain']:.2f} / m")
