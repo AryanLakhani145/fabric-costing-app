@@ -64,6 +64,15 @@ init_db()
 # Helper functions (Postgres)
 # ---------------------------
 
+def normalize_json(val):
+    if val is None:
+        return None
+    if isinstance(val, (dict, list)):
+        return json.dumps(val)
+    if isinstance(val, str):
+        return val
+    return None
+
 @st.cache_data(ttl=300)
 def list_all_qualities_full():
     """
@@ -315,7 +324,7 @@ def save_quality(data):
         data["interest_on_yarn_100"], data["final_grey_cost_100"],
         data["grey_sale_100"], data["rfd_cost_100"], data["rfd_sale_100"],
         bool(data.get("include_interest", True)),
-        json.dumps(data["wefts_json"]) if isinstance(data.get("wefts_json"), (list, dict)) else data.get("wefts_json")
+        normalize_json(data.get("wefts_json"))
     ))
 
     conn.commit()
@@ -418,7 +427,7 @@ def update_quality(q_id, data):
         data["rfd_cost_100"],
         data["rfd_sale_100"],
 
-        str(data.get("wefts_json")) if data.get("wefts_json") is not None else None,
+        normalize_json(data.get("wefts_json")),
         bool(data["include_interest"]),
         q_id
     ))
