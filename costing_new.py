@@ -315,7 +315,7 @@ def save_quality(data):
         data["interest_on_yarn_100"], data["final_grey_cost_100"],
         data["grey_sale_100"], data["rfd_cost_100"], data["rfd_sale_100"],
         bool(data.get("include_interest", True)),
-        str(data.get("wefts_json")) if data.get("wefts_json") is not None else None
+        json.dumps(data["wefts_json"]) if isinstance(data.get("wefts_json"), (list, dict)) else data.get("wefts_json")
     ))
 
     conn.commit()
@@ -420,7 +420,7 @@ def update_quality(q_id, data):
 
         str(data.get("wefts_json")) if data.get("wefts_json") is not None else None,
         bool(data["include_interest"]),
-        data.get("wefts_json")
+        q_id
     ))
 
     conn.commit()
