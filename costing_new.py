@@ -2713,6 +2713,8 @@ elif page == "💰 Deal Margin Calculator":
         quantity_m=quantity_m,
     )
 
+    interest_gain = result["interest_gain"]
+
     # ---- Result summary ----
     st.markdown("### 📊 Result")
 
@@ -2727,8 +2729,9 @@ elif page == "💰 Deal Margin Calculator":
 
 
     # ---- Explicit margin math (hidden by default) ----
-    base_margin = result["realised_price"] - result["actual_cost"]
+    base_margin = result["realised_price"] - base_cost
     final_margin = result["profit_per_m"]
+    interest_gain = result["interest_gain"]
 
     with st.expander("🧮 Show margin calculation"):
         st.markdown("### 🧮 Margin Calculation (explicit check)")
@@ -2738,17 +2741,17 @@ elif page == "💰 Deal Margin Calculator":
         with bc1:
             st.markdown(
     f"""
-    **Base margin (without interest):**  
+    **Base margin (with full interest):**  
     ₹{result['realised_price']:.2f} − ₹{base_cost:.2f}  
     = **₹{base_margin:.2f} / m**
     """
             )
 
-            if result["interest_gain"] > 0:
+            if interest_gain > 0:
                 st.markdown(
     f"""
-    **Interest benefit (early payment):**  
-    + ₹{result["interest_gain"]:.2f} / m
+    **Interest benefit (only 2 months saved):**  
+    + ₹{interest_gain:.2f} / m
     """
                 )
 
@@ -2766,9 +2769,8 @@ elif page == "💰 Deal Margin Calculator":
         with bc2:
             st.info(
                 "ℹ️ **How to read this**\n\n"
-                "• Saved cost already includes interest\n"
-                "• Discounted payment removes interest cost\n"
-                "• Cost already includes 4% interest"
-                "• Discounted payment still carries ~2% interest"
-                "• Only half the interest is actually saved"
+                "• Base cost includes full 4% interest\n"
+                "• Discounted payment still incurs ~2% interest\n"
+                "• Only half the interest is actually saved\n"
+                "• Final margin reflects real cash profit"
             )
