@@ -2622,7 +2622,7 @@ elif page == "💰 Deal Margin Calculator":
         base_cost = cost["rfd_cost_per_m"]
         brokerage_allowed = True
 
-    interest_per_m = cost["interest_on_yarn_100"] / 100.0
+    interest_per_m = cost["interest_on_yarn_100"] / 100.0 / 2.0
 
     # ---- Deal price ----
     reference_price = cost["grey_sale_per_m"] if sale_type == "Grey" else cost["rfd_sale_per_m"]
