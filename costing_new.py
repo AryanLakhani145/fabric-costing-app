@@ -2729,44 +2729,44 @@ elif page == "💰 Deal Margin Calculator":
     interest_gain = result["interest_gain"]
     final_margin = result["profit_per_m"]
 
-with st.expander("🧮 Show margin calculation"):
-    st.markdown("### 🧮 Margin Calculation (explicit check)")
+    with st.expander("🧮 Show margin calculation"):
+        st.markdown("### 🧮 Margin Calculation (explicit check)")
 
-    bc1, bc2 = st.columns([2, 1])
+        bc1, bc2 = st.columns([2, 1])
 
-    with bc1:
-        st.markdown(
-f"""
-**Base margin (without interest):**  
-₹{result['realised_price']:.2f} − ₹{base_cost:.2f}  
-= **₹{base_margin:.2f} / m**
-"""
-        )
-
-        if interest_gain > 0:
+        with bc1:
             st.markdown(
-f"""
-**Interest benefit (early payment):**  
-+ ₹{interest_gain:.2f} / m
-"""
+    f"""
+    **Base margin (without interest):**  
+    ₹{result['realised_price']:.2f} − ₹{base_cost:.2f}  
+    = **₹{base_margin:.2f} / m**
+    """
             )
 
-        st.markdown(
-f"""
----
+            if interest_gain > 0:
+                st.markdown(
+    f"""
+    **Interest benefit (early payment):**  
+    + ₹{interest_gain:.2f} / m
+    """
+                )
 
-### ✅ Final Margin
+            st.markdown(
+    f"""
+    ---
 
-₹{base_margin:.2f} + ₹{interest_gain:.2f}  
-= **₹{final_margin:.2f} / m**
-"""
-        )
+    ### ✅ Final Margin
 
-    with bc2:
-        st.info(
-            "ℹ️ **How to read this**\n\n"
-            "• Saved cost already includes interest\n"
-            "• Discounted payment removes interest cost\n"
-            "• Interest saved becomes extra margin\n"
-            "• Net payment → interest benefit = 0"
-        )
+    ₹{base_margin:.2f} + ₹{interest_gain:.2f}  
+    = **₹{final_margin:.2f} / m**
+    """
+            )
+
+        with bc2:
+            st.info(
+                "ℹ️ **How to read this**\n\n"
+                "• Saved cost already includes interest\n"
+                "• Discounted payment removes interest cost\n"
+                "• Interest saved becomes extra margin\n"
+                "• Net payment → interest benefit = 0"
+            )
