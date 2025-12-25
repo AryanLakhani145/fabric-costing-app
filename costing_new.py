@@ -2724,49 +2724,51 @@ elif page == "💰 Deal Margin Calculator":
         if result["interest_gain"] > 0:
             st.write(f"Interest benefit: ₹{result['interest_gain']:.2f} / m")
 
-    # ---- Explicit margin math ----
+    # ---- Explicit margin math (hidden by default) ----
     base_margin = result["realised_price"] - base_cost
     interest_gain = result["interest_gain"]
     final_margin = result["profit_per_m"]
 
-show_calc = st.button("🧮 Show margin calculation")
+    show_calc = st.button("🧮 Show margin calculation")
 
-if show_calc:
-    st.markdown("### 🧮 Margin Calculation (explicit check)")
+    if show_calc:
+        st.markdown("### 🧮 Margin Calculation (explicit check)")
 
-    bc1, bc2 = st.columns([2, 1])
+        bc1, bc2 = st.columns([2, 1])
 
-    with bc1:
-        st.markdown(
+        with bc1:
+            st.markdown(
 f"""
 **Base margin (without interest):**  
-₹{result['realised_price']:.2f} − ₹{base_cost:.2f} = **₹{base_margin:.2f} / m**
+₹{result['realised_price']:.2f} − ₹{base_cost:.2f}  
+= **₹{base_margin:.2f} / m**
 """
-        )
+            )
 
-        if interest_gain > 0:
-            st.markdown(
+            if interest_gain > 0:
+                st.markdown(
 f"""
 **Interest benefit (early payment):**  
 + ₹{interest_gain:.2f} / m
 """
-            )
+                )
 
-        st.markdown(
+            st.markdown(
 f"""
 ---
 
 ### ✅ Final Margin
 
-₹{base_margin:.2f} + ₹{interest_gain:.2f} = **₹{final_margin:.2f} / m**
+₹{base_margin:.2f} + ₹{interest_gain:.2f}  
+= **₹{final_margin:.2f} / m**
 """
-        )
+            )
 
-    with bc2:
-        st.info(
-            "ℹ️ **How to read this**\n\n"
-            "• Saved cost already includes interest\n"
-            "• Discounted payment removes interest cost\n"
-            "• Interest saved becomes extra margin\n"
-            "• Net payment → interest benefit = 0"
-        )
+        with bc2:
+            st.info(
+                "ℹ️ **How to read this**\n\n"
+                "• Saved cost already includes interest\n"
+                "• Discounted payment removes interest cost\n"
+                "• Interest saved becomes extra margin\n"
+                "• Net payment → interest benefit = 0"
+            )
