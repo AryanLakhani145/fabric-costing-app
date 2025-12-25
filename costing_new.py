@@ -2716,3 +2716,58 @@ elif page == "💰 Deal Margin Calculator":
         st.write(f"Effective cost: ₹{result['effective_cost']:.2f} / m")
         if result["interest_gain"] > 0:
             st.write(f"Interest benefit: ₹{result['interest_gain']:.2f} / m")
+    
+    # --- explicit breakdown values ---
+    stored_cost_per_m = base_cost
+    interest_benefit_per_m = result["interest_gain"]
+    realised_price_per_m = result["realised_price"]
+    base_margin_per_m = realised_price_per_m - stored_cost_per_m
+    final_margin_per_m = result["profit_per_m"]
+
+    st.markdown("### 🧮 Margin Calculation (explicit check)")
+
+    bc1, bc2 = st.columns([2, 1])
+
+    with bc1:
+        st.markdown(
+            f"""
+    **Realised selling price:** see cash received  
+    ₹{realised_price_per_m:.2f} / m  
+
+    **Saved cost (includes interest):**  
+    ₹{stored_cost_per_m:.2f} / m  
+
+    **Base margin (before interest):**  
+    ₹{realised_price_per_m:.2f} − ₹{stored_cost_per_m:.2f}  
+    = **₹{base_margin_per_m:.2f} / m**
+    """
+        )
+
+        if interest_benefit_per_m > 0:
+            st.markdown(
+                f"""
+    **Interest benefit (early payment):**  
+    + ₹{interest_benefit_per_m:.2f} / m
+    """
+            )
+
+        st.markdown(
+            f"""
+    ---
+
+    ### ✅ Final Margin
+
+    ₹{base_margin_per_m:.2f}
+    + ₹{interest_benefit_per_m:.2f}
+    = **₹{final_margin_per_m:.2f} / m**
+    """
+        )
+
+    with bc2:
+        st.info(
+            "ℹ️ **How to read this**\n\n"
+            "• Saved cost includes interest\n"
+            "• Early payment removes interest cost\n"
+            "• Interest saved becomes extra margin\n"
+            "• Net payment → interest benefit = 0"
+        )
