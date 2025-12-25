@@ -2691,6 +2691,7 @@ elif page == "💰 Deal Margin Calculator":
         min_value=0.0,
         step=100.0,
         value=1000.0,
+        key="deal_margin_quantity"
     )
 
     # ---- Calculate ----
