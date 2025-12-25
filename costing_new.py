@@ -782,7 +782,7 @@ def calculate_deal_margin(
     # ---- Interest logic ----
     if payment_mode == "discount":
         effective_cost = base_cost_per_m - interest_per_m
-        interest_gain = interest_per_m
+        interest_gain = interest_per_m * 0.5
     else:
         effective_cost = base_cost_per_m
         interest_gain = 0.0
