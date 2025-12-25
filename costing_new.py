@@ -784,9 +784,11 @@ def calculate_deal_margin(
     effective_interest = interest_per_m / 2.0
 
     if payment_mode == "discount":
-        actual_cost = cost_with_interest_per_m - effective_interest
+        actual_cost = cost_with_interest_per_m - (interest_per_m / 2.0)
+        interest_gain = interest_per_m / 2.0
     else:
         actual_cost = cost_with_interest_per_m
+        interest_gain = 0.0
 
     profit_per_m = realised_price - actual_cost
     total_profit = profit_per_m * quantity_m
@@ -796,7 +798,7 @@ def calculate_deal_margin(
         "discount_amt": discount_amt,
         "brokerage_amt": brokerage_amt,
         "actual_cost": actual_cost,
-        "effective_interest": effective_interest,
+        "interest_gain": interest_gain,
         "profit_per_m": profit_per_m,
         "total_profit": total_profit,
     }
@@ -2622,7 +2624,7 @@ elif page == "💰 Deal Margin Calculator":
         base_cost = cost["rfd_cost_per_m"]
         brokerage_allowed = True
 
-    interest_per_m = cost["interest_on_yarn_100"] / 100.0 / 2.0
+    interest_per_m = cost["interest_on_yarn_100"] / 100.0 
 
     # ---- Deal price ----
     reference_price = cost["grey_sale_per_m"] if sale_type == "Grey" else cost["rfd_sale_per_m"]
