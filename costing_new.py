@@ -2624,17 +2624,14 @@ elif page == "💰 Deal Margin Calculator":
     interest_per_m = cost["interest_on_yarn_100"] / 100.0
 
     # ---- Deal price ----
-    reference_price = (
-        cost["grey_sale_per_m"]
-        if sale_type == "Grey"
-        else cost["rfd_sale_per_m"]
-    )
+    reference_price = cost["grey_sale_per_m"] if sale_type == "Grey" else cost["rfd_sale_per_m"]
 
     deal_price = st.number_input(
         "Deal selling price (₹ / meter)",
         min_value=0.0,
         step=0.1,
         value=float(reference_price),
+        key="deal_margin_price"
     )
 
     # ---- Payment terms ----
@@ -2642,6 +2639,7 @@ elif page == "💰 Deal Margin Calculator":
         "Payment terms",
         ["Net (90–100 days)", "Discounted (early payment)"],
         horizontal=True,
+        key="deal_margin_payment"
     )
 
     if payment_mode_label.startswith("Discounted"):
@@ -2649,13 +2647,18 @@ elif page == "💰 Deal Margin Calculator":
             "Discount type",
             ["Standard (5%)", "Custom"],
             horizontal=True,
+            key="deal_margin_discount_type"
         )
-        discount_percent = 5.0 if discount_type == "Standard (5%)" else st.number_input(
-            "Custom discount %",
-            min_value=0.0,
-            step=0.1,
-            value=5.0,
-        )
+        if discount_type == "Standard (5%)":
+            discount_percent = 5.0
+        else:
+            discount_percent = st.number_input(
+                "Custom discount %",
+                min_value=0.0,
+                step=0.1,
+                value=5.0,
+                key="deal_margin_discount_custom"
+            )
         payment_mode = "discount"
     else:
         discount_percent = 0.0
@@ -2664,12 +2667,13 @@ elif page == "💰 Deal Margin Calculator":
     # ---- Brokerage ----
     brokerage_percent = 0.0
     if brokerage_allowed:
-        apply_brokerage = st.checkbox("Apply brokerage")
+        apply_brokerage = st.checkbox("Apply brokerage", key="deal_margin_apply_brokerage")
         if apply_brokerage:
             brokerage_choice = st.radio(
                 "Brokerage %",
                 ["1%", "1.5%", "2%", "Custom"],
                 horizontal=True,
+                key="deal_margin_brokerage_choice"
             )
             if brokerage_choice == "1%":
                 brokerage_percent = 1.0
@@ -2683,6 +2687,7 @@ elif page == "💰 Deal Margin Calculator":
                     min_value=0.0,
                     step=0.1,
                     value=1.0,
+                    key="deal_margin_brokerage_custom"
                 )
 
     # ---- Quantity ----
@@ -2705,6 +2710,7 @@ elif page == "💰 Deal Margin Calculator":
         quantity_m=quantity_m,
     )
 
+    # ---- Result summary ----
     st.markdown("### 📊 Result")
 
     c1, c2 = st.columns(2)
@@ -2714,16 +2720,14 @@ elif page == "💰 Deal Margin Calculator":
 
     with c2:
         st.write(f"Realised price: ₹{result['realised_price']:.2f} / m")
-        st.write(f"Effective cost: ₹{result['effective_cost']:.2f} / m")
+        st.write(f"Saved cost (includes interest): ₹{base_cost:.2f} / m")
         if result["interest_gain"] > 0:
             st.write(f"Interest benefit: ₹{result['interest_gain']:.2f} / m")
-    
-    # --- explicit breakdown values ---
-    stored_cost_per_m = base_cost
-    interest_benefit_per_m = result["interest_gain"]
-    realised_price_per_m = result["realised_price"]
-    base_margin_per_m = realised_price_per_m - stored_cost_per_m
-    final_margin_per_m = result["profit_per_m"]
+
+    # ---- Explicit margin math ----
+    base_margin = result["realised_price"] - base_cost
+    interest_gain = result["interest_gain"]
+    final_margin = result["profit_per_m"]
 
     st.markdown("### 🧮 Margin Calculation (explicit check)")
 
@@ -2731,44 +2735,35 @@ elif page == "💰 Deal Margin Calculator":
 
     with bc1:
         st.markdown(
-            f"""
-    **Realised selling price:** see cash received  
-    ₹{realised_price_per_m:.2f} / m  
-
-    **Saved cost (includes interest):**  
-    ₹{stored_cost_per_m:.2f} / m  
-
-    **Base margin (before interest):**  
-    ₹{realised_price_per_m:.2f} − ₹{stored_cost_per_m:.2f}  
-    = **₹{base_margin_per_m:.2f} / m**
-    """
+f"""
+**Base margin (without interest):**  
+₹{result['realised_price']:.2f} − ₹{base_cost:.2f} = **₹{base_margin:.2f} / m**
+"""
         )
 
-        if interest_benefit_per_m > 0:
+        if interest_gain > 0:
             st.markdown(
-                f"""
-    **Interest benefit (early payment):**  
-    + ₹{interest_benefit_per_m:.2f} / m
-    """
+f"""
+**Interest benefit (early payment):**  
++ ₹{interest_gain:.2f} / m
+"""
             )
 
         st.markdown(
-            f"""
-    ---
+f"""
+---
 
-    ### ✅ Final Margin
+### ✅ Final Margin
 
-    ₹{base_margin_per_m:.2f}
-    + ₹{interest_benefit_per_m:.2f}
-    = **₹{final_margin_per_m:.2f} / m**
-    """
+₹{base_margin:.2f} + ₹{interest_gain:.2f} = **₹{final_margin:.2f} / m**
+"""
         )
 
     with bc2:
         st.info(
             "ℹ️ **How to read this**\n\n"
-            "• Saved cost includes interest\n"
-            "• Early payment removes interest cost\n"
+            "• Saved cost already includes interest\n"
+            "• Discounted payment removes interest cost\n"
             "• Interest saved becomes extra margin\n"
             "• Net payment → interest benefit = 0"
         )
