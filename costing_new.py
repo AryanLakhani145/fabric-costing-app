@@ -873,6 +873,7 @@ if page == "🧶 Yarn Prices":
                     price_per_kg=price_per_kg,
                     valid_from=valid_from.isoformat()
                 )
+                st.cache_data.clear()   # 🔥 THIS LINE
                 st.success("Yarn price saved as latest for this yarn.")
 
     st.subheader("Existing yarn prices (latest first)")
@@ -961,10 +962,12 @@ if page == "🧶 Yarn Prices":
                         price_per_kg=new_price,
                         valid_from=new_valid_from.isoformat()
                     )
+                    st.cache_data.clear()
                     st.success("Yarn updated successfully.")
             with b2:
                 if st.button("🗑 Delete this yarn completely", key=f"delete_yarn_{selected_yarn}"):
                     delete_yarn_completely(selected_yarn)
+                    st.cache_data.clear()
                     st.warning(f"Yarn '{selected_yarn}' deleted. Reload page to refresh.")
         else:
             st.info("No data found for this yarn.")
