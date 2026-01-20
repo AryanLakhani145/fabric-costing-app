@@ -2185,11 +2185,17 @@ elif page == "🔍 Search Qualities":
                                 value=float(q["warp_denier"])
                             )
                         with ew2:
+                            latest_warp_price = q["warp_yarn_price"]
+                            if q.get("warp_yarn_name"):
+                                p, _, _ = get_latest_yarn_price(q["warp_yarn_name"], "warp")
+                                if p:
+                                    latest_warp_price = p
+
                             new_warp_yarn_price = st.number_input(
                                 "Warp yarn price per kg (₹)",
                                 min_value=0.0,
                                 step=0.1,
-                                value=float(q["warp_yarn_price"])
+                                value=float(latest_warp_price)
                             )
 
                         # 🔹 Multi-weft edit section
@@ -2255,6 +2261,10 @@ elif page == "🔍 Search Qualities":
                                 )
 
                                 price_val = float(wf.get("price", 0.0) or 0.0)
+                                if yarn_name_val != "(manual price)":
+                                    latest_price, latest_dnr, latest_cnt = get_latest_yarn_price(yarn_name_val, "weft")
+                                    if latest_price is not None:
+                                        price_val = latest_price
 
                                 # 🔥 Auto-fill from yarn table
                                 if yarn_name_val != "(manual price)":
